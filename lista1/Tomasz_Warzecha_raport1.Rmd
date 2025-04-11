@@ -1,0 +1,372 @@
+---
+title: "Raport 1"
+subtitle: "Eksploracja danych"
+author: "Tomasz Warzecha,   album 282261"
+date: "`r Sys.Date()`"
+header-includes:
+   - \usepackage[OT4]{polski}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+
+\newpage
+
+# Przygotowanie danych
+## Krótki opis zagadnienia
+ 
+Niniejszy raport przedstawia analizę danych dotyczących rezygnacji klientów (churn) firmy telekomunikacyjnej. Głównym celem badania jest identyfikacja czynników wpływających na decyzję klientów o rezygnacji z usług. Dane pochodzą ze zbioru WA_Fn-UseC_-Telco-Customer-Churn.csv dostępnego na platformie Kaggle i zawierają informacje o 7043 klientach, w tym ich charakterystyki demograficzne, subskrybowane usługi oraz status konta.
+
+
+```{r wczytanie,echo=FALSE,results = "asis"}
+dane <- read.csv(file="WA_Fn-UseC_-Telco-Customer-Churn.csv", stringsAsFactors=TRUE)
+#str(dane)
+#dim(dane)
+library(kableExtra)
+
+struktura_danych <- sapply(dane, class)
+
+
+struktura_danych %>%
+  kbl(caption = "Struktura danych", format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+
+Zmienna `SeniorCitizen` powinna być jakościowa, a nie ilościowa, gdyż przyjmuje dwie wartości. Pozostałe zmienne zostały poprawnie rozpoznane jako jakościowe (factor) lub ilościowe (numeric).
+
+
+```{r etap1,echo = FALSE,results = "asis"}
+dane$SeniorCitizen <- as.factor(dane$SeniorCitizen)
+dane$SeniorCitizen <- factor(dane$SeniorCitizen, labels = c("No", "Yes"))
+
+#is.factor(dane$SeniorCitizen)
+
+#podpunkt b
+rozmiar_danych <- dim(dane)
+
+
+dane <- dane[,-1]
+library(kableExtra)
+missing_summary <- colSums(is.na(dane))
+missing_summary <- missing_summary[missing_summary > 0] # tylko kolumny z brakami
+missing_summary %>% 
+  kbl(caption="Brakujace dane", format="latex", digits=2) %>%
+          kable_styling(latex_options = c("striped", "HOLD_position"))
+
+
+
+```
+## Analiza struktury danych
+
+Nasze dane mają `r rozmiar_danych[1]` przypadków i `r rozmiar_danych[2]` cech.
+W powyższej tabeli możemy zobaczyć wszystkie cechy oraz ich typy. Mamy 3 cechy o warościach numerycznych oraz 18 cech o wartościach typu factor(po zmianie typu zmiennej `SeniorCitizen`).  Cecha `CustomerID` (factor) nie będzie nam potrzebna w dalszej analizie, zatem możemy ją usunąć.
+W naszych danych mamy 11 brakujących wartości, wszystkie znajdują się w kolumnie `TotalCharges` i są typu NA. 
+
+# Analiza opisowa 
+## Wskaźniki sumaryczne
+Poniżej znajdują się wskaznii sumaryczne dla zmiennych ilościowych.
+```{r etap2, echo = FALSE,results = "asis"}
+#summary(dane$tenure)
+#summary(dane$MonthlyCharges)
+#summary(dane$TotalCharges)
+library(kableExtra)
+nazwy.wskaznikow <- names(summary(dane$tenure))
+nazwy.zmiennych  <- c("tenure", "MonthlyCharges", "TotalCharges")
+tenure.summary <- as.vector(summary(dane$tenure))
+MonthlyCharges.summary <- as.vector(summary(dane$MonthlyCharges))
+TotalCharges.summary <- as.vector(summary(dane$TotalCharges))
+TotalCharges.summary <- TotalCharges.summary[-7]
+summary.matrix <- rbind(tenure.summary, MonthlyCharges.summary,  TotalCharges.summary)
+row.names(summary.matrix) <- nazwy.zmiennych
+colnames(summary.matrix)  <- nazwy.wskaznikow
+
+
+summary.matrix %>% 
+  kbl(caption="Podstawowe wskaźniki sumaryczne dla zmiennnych tenure,  MonthlyCharges i TotalCharges", format="latex", digits=2) %>% 
+          kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+Analiza zmiennych ilościowych pokazuje, że:
+ 
+- `tenure` (czas trwania usługi w miesiącach) waha się od 1 do 72 miesięcy, przy średniej około 32 miesięcy
+- `MonthlyCharges` (miesięczne opłaty) wynoszą średnio 64.76, z zakresem od 18.25 do 118.75
+- `TotalCharges` (całkowite opłaty) zgodnie z intuicją wykazują największą zmienność, od 18.8 do 8684.8, gdzie średnia wynosi 1397.5
+
+Poniżej znajdują się wskażnikic dla zmiennych jakościowych
+```{r , echo= FALSE}
+zmienne_jakosciowe <- c("gender", "SeniorCitizen", "Partner", "Dependents", 
+                       "PhoneService", "MultipleLines", "InternetService", 
+                       "OnlineSecurity", "OnlineBackup", "DeviceProtection", 
+                       "TechSupport", "StreamingTV", "StreamingMovies", 
+                       "Contract", "PaperlessBilling", "PaymentMethod", "Churn")
+
+library(dplyr)
+library(knitr)
+
+dane %>%
+  select(all_of(zmienne_jakosciowe)) %>%
+  summarise_all(~list(table(.))) %>%
+  tidyr::gather(Zmienna, Rozklad) %>%
+  mutate(Rozklad = sapply(Rozklad, function(x) paste(names(x), ":", x, collapse = "; "))) %>%
+  kable(format = "latex", booktabs = TRUE, caption = "wskaźniki sumaryczne dla zmiennych jakościowych")%>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+
+```
+Kluczowe obserwacje dotyczące zmiennych jakościowych:
+
+Rozkład płci wśród klientów jest niemal równy – liczba kobiet i mężczyzn jest bardzo zbliżona. Wśród użytkowników stosunkowo niewielki odsetek stanowią seniorzy. Znaczna część klientów zdecydowała się na rezygnację z usług, co wskazuje na dość wysoką rotację. Jeśli chodzi o preferowane typy umów, większość osób wybiera opcję miesięczną, a ponad połowa klientów korzysta z elektronicznego systemu rozliczeń, rezygnując z tradycyjnych papierowych faktur.
+
+\newpage
+
+## Wykresy
+
+Poniżej znajdują się histogramy oraz wykresy pudełkowe dla zmiennych ilościowych. 
+```{r , echo= FALSE}
+par(mfrow=c(1,3))
+kolory <- c("lightblue", "lightgreen", "darkblue", "darkgreen")
+hist(dane$tenure, main = "tenure", col = kolory[1])
+title("Histogramy dla zmiennych ilościowych", outer = TRUE, line = -1)
+hist(dane$MonthlyCharges, main = "MonthlyCharges", col = kolory[2])
+hist(dane$TotalCharges, main = "TotalCharges", col = kolory[3])
+boxplot(dane$tenure, main = "tenure", col = kolory[1])
+title("Wykresy pudełkowe dla zmiennych ilościowych", outer = TRUE, line = -1)
+boxplot(dane$MonthlyCharges, main = "MonthlyCharges", col = kolory[2])
+boxplot(dane$TotalCharges, main = "TotalCharges", col = kolory[3])
+```
+\newpage
+
+Histogramy i wykresy pudełkowe pokazują, że:
+ 
+- Rozkład czasu trwania usługi (`tenure`) jest najbardziej zbilżony do symetrycznego, jednak w dalszym ciągu widzimy znaczącą przewagę nowych klientów. Warto jednak zauważyć że jest spora część lojalnych klientów, którzy zostają na dłużej.
+- Miesięczne opłaty (`MonthlyCharges`) mają rozkład który wybija się w dwóch miejscach, co może sugerować że mamy dwa najpopopularniejsze pakiety usług o różnych cenach.
+- Całkowite opłaty (`TotalCharges`) dla większości klientów są niskie, co jest spodziewane przy zmiennej będącej iloczynem czasu i stawek, szczególnie podczas gdy większość naszych klientów jest nowa. 
+
+## Wykresy zmiennych jakościowych
+Ponizej wykresy dla zmiennych jakościowych:
+
+```{r ,echo= FALSE}
+par(mfrow=c(1,3))
+kolory <- c("lightblue", "lightgreen", "darkblue", "darkgreen")
+barplot(table(dane$Partner), col = kolory[1:2], main = "Partner", ylab = "Number of customers")
+barplot(table(dane$Churn), col = kolory[1:2],main = "Churn", ylab = "Number of customers")
+barplot(table(dane$PaymentMethod), col = kolory,main = "Payment Methods", ylab = "Number of customers",cex.names = 0.7, las = 2)
+barplot(table(dane$InternetService), col = kolory[1:3],main = "Internet Service Type", ylab = "Number of customers",cex.names = 0.7, las = 2)
+barplot(table(dane$Contract), col = kolory[1:3],main = "contract length", ylab = "Number of customers",cex.names = 0.7, las = 2)
+barplot(table(dane$PaperlessBilling), col = kolory[1:2],main = "Paperless Billing", ylab = "Number of customers"	)
+## barplot(table(dane$SeniorCitizen))
+## barplot(table(dane$gender))
+## barplot(table(dane$Dependents))
+## barplot(table(dane$PhoneService))
+## barplot(table(dane$MultipleLines))
+## barplot(table(dane$StreamingTV))
+## barplot(table(dane$StreamingMovies))
+## barplot(table(dane$OnlineSecurity))
+## barplot(table(dane$OnlineBackup))
+## barplot(table(dane$DeviceProtection))
+## barplot(table(dane$TechSupport))
+```
+Większość klientów nie posiada partnera, jednak różnice w liczebności obu grup nie są znaczące. Analizując metody płatności, widać, że najczęściej wybieraną opcją są czeki elektroniczne, podczas gdy reszta płatności jest mniej popularna. Może to wynikać z wygody oraz przyzwyczajeń klientów. Jeśli chodzi o rodzaj internetu, największa grupa klientów korzysta z internetu światłowodowego, natomiast DSL nadal ma znaczącą liczbę użytkowników. Część klientów nie korzysta z internetu w ramach tej usługi. Najczęściej wybieranym typem umowy jest miesięczna, co może świadczyć o potrzebie elastyczności i unikaniu długoterminowych zobowiązań. Kontrakty dwuletnie są znacznie mniej popularne. Z kolei faktury elektroniczne są wybierane przez większość klientów, co sugeruje, że klienci preferują wygodne i ekologiczne rozwiązania.
+
+# Wykresy rozrzutu
+
+```{r , echo=FALSE}
+library(DataExplorer)
+dane_ciagle <- split_columns(dane)$continuous
+plot_scatterplot(dane_ciagle, by = "tenure", nrow = 1, ncol = 2, geom_point_args = list(size = 0.15, color = "darkblue"))
+
+plot_scatterplot(na.omit(dane_ciagle), by = "MonthlyCharges", nrow = 1, ncol = 2, geom_point_args = list(size = 0.2, color = "darkgreen"))
+
+plot_scatterplot(dane_ciagle, by = "TotalCharges", nrow = 1, ncol = 2, geom_point_args = list(size = 0.2, color = "darkred"))
+
+```
+Wykresy rozrzutu nie wskazują na istnienie wyraźnych zależności liniowych między analizowanymi zmiennymi. Najbardziej zauważalna korelacja pojawia się w przypadku zależności między długością korzystania z usługi (tenure) a całkowitymi opłatami (TotalCharges), jednak nie jest ona idelnie liniowa ze względu na duży rozrzut danych. Jest to zgodne z intuicją – im dłużej klient korzysta z usługi, tym większe łączne koszty ponosi.
+\newpage
+
+# Analiza opisowa z podziałem na grupy
+
+## Wskazniki sumaryczne dla grup
+
+Wskazniki sumaryczne dla zmiennych ilosciowych dla grup:
+```{r , echo= FALSE}
+# Podział danych na grupy według zmiennej Churn
+dane_churn_yes <- subset(dane, Churn == "Yes")
+dane_churn_no <- subset(dane, Churn == "No")
+
+# Churn = Yes
+nazwy.wskaznikow_yes <- names(summary(dane_churn_yes$tenure))
+nazwy.zmiennych_yes  <- c("tenure", "MonthlyCharges", "TotalCharges")
+tenure.summary_yes <- as.vector(summary(dane_churn_yes$tenure))
+MonthlyCharges.summary_yes <- as.vector(summary(dane_churn_yes$MonthlyCharges))
+TotalCharges.summary_yes <- as.vector(summary(dane_churn_yes$TotalCharges))
+TotalCharges.summary_yes <- TotalCharges.summary_yes[-7]
+summary.matrix_yes <- rbind(tenure.summary_yes, MonthlyCharges.summary_yes, TotalCharges.summary_yes)
+row.names(summary.matrix_yes) <- nazwy.zmiennych_yes
+colnames(summary.matrix_yes)  <- nazwy.wskaznikow_yes
+
+# Churn = No
+nazwy.wskaznikow_no <- names(summary(dane_churn_no$tenure))
+nazwy.zmiennych_no  <- c("tenure", "MonthlyCharges", "TotalCharges")
+tenure.summary_no <- as.vector(summary(dane_churn_no$tenure))
+MonthlyCharges.summary_no <- as.vector(summary(dane_churn_no$MonthlyCharges))
+TotalCharges.summary_no <- as.vector(summary(dane_churn_no$TotalCharges))
+TotalCharges.summary_no <- TotalCharges.summary_no[-7]
+summary.matrix_no <- rbind(tenure.summary_no, MonthlyCharges.summary_no, TotalCharges.summary_no)
+row.names(summary.matrix_no) <- nazwy.zmiennych_no
+colnames(summary.matrix_no)  <- nazwy.wskaznikow_no
+
+summary.matrix_yes %>% 
+  kbl(caption="Podstawowe wskaźniki sumaryczne dla zmiennych ilościowych (Churn = Yes)", format="latex", digits=2) %>% 
+          kable_styling(latex_options = c("striped", "HOLD_position"))
+
+summary.matrix_no %>% 
+  kbl(caption="Podstawowe wskaźniki sumaryczne dla zmiennych ilościowych (Churn = No)", format="latex", digits=2) %>% 
+          kable_styling(latex_options = c("striped", "HOLD_position"))
+
+```
+Opis wskaźników sumarycznych dla klientów, którzy odeszli (Churn = Yes):
+
+- `tenure`: Czas trwania usługi waha się od 1 do 72 miesięcy, przy medianie wynoszącej 10 miesięcy i średniej około 17.98 miesięcy. Wskazuje to, że większość klientów, którzy odeszli, korzystała z usług stosunkowo krótko.
+- `MonthlyCharges`: Miesięczne opłaty wynoszą średnio 74.44, z medianą 79.65. Zakres wartości jest szeroki (od 18.85 do 118.35), co pokazuje zróżnicowanie wśród klientów.
+- `TotalCharges`: Całkowite opłaty wahają się od 18.85 do 8684.80, przy średniej 1531.80 i medianie 703.55. Niższa mediana w porównaniu do średniej sugeruje, że wielu klientów opuściło usługę po stosunkowo niskich całkowitych opłatach.
+
+Opis wskaźników sumarycznych dla klientów, którzy zostali (Churn = No):
+
+- `tenure`: Czas trwania usługi wynosi od 0 do 72 miesięcy, przy medianie 38 miesięcy i średniej 37.57 miesięcy. Wskazuje to, że klienci, którzy zostali, korzystali z usług znacznie dłużej niż ci, którzy odeszli.
+- `MonthlyCharges`: Miesięczne opłaty są średnio niższe (61.27) w porównaniu do klientów, którzy odeszli, z medianą 64.43. Zakres wartości jest podobny (od 18.25 do 118.75).
+- `TotalCharges`: Całkowite opłaty są znacznie wyższe (średnia 2555.34, mediana 1683.60) niż w przypadku klientów, którzy odeszli, co jest spójne z dłuższym czasem trwania usługi.
+
+Podsumowanie:
+Klienci, którzy odeszli, charakteryzują się krótszym czasem korzystania z usług (niższe wartości tenure) i niższymi całkowitymi opłatami (TotalCharges), pomimo wyższych średnich miesięcznych opłat (MonthlyCharges). Natomiast klienci, którzy zostali, mają dłuższy czas trwania usługi i wyższe całkowite opłaty, co może odzwierciedlać ich większą lojalność i satysfakcję z usług.
+
+
+Wskaźniki sumaryczne dla zmiennych jakościowych dla grup
+```{r , echo= FALSE}
+zmienne_jakosciowe <- c("gender", "SeniorCitizen", "Partner", "Dependents", 
+                       "PhoneService", "MultipleLines", "InternetService", 
+                       "OnlineSecurity", "OnlineBackup", "DeviceProtection", 
+                       "TechSupport", "StreamingTV", "StreamingMovies", 
+                       "Contract", "PaperlessBilling", "PaymentMethod")
+
+# Churn = Yes
+dane_churn_yes %>% 
+  select(all_of(zmienne_jakosciowe)) %>% 
+  summarise_all(~list(table(.))) %>% 
+  tidyr::gather(Zmienna, Rozklad) %>% 
+  mutate(Rozklad = sapply(Rozklad, function(x) paste(names(x), ":", x, collapse = "; "))) %>% 
+  kable(format = "latex", booktabs = TRUE, caption = "Wskaźniki sumaryczne dla zmiennych jakościowych (Churn = Yes)")%>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+
+# Churn = No
+dane_churn_no %>% 
+  select(all_of(zmienne_jakosciowe)) %>% 
+  summarise_all(~list(table(.))) %>% 
+  tidyr::gather(Zmienna, Rozklad) %>% 
+  mutate(Rozklad = sapply(Rozklad, function(x) paste(names(x), ":", x, collapse = "; "))) %>% 
+  kable(format = "latex", booktabs = TRUE, caption = "Wskaźniki sumaryczne dla zmiennych jakościowych (Churn = No)")%>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+
+```
+\newpage
+
+## Wykresy zmiennych ilościowych dla grup
+```{r ,echo=FALSE}
+par(mfrow=c(1,2))
+
+kolory <- c("darkblue", "darkred", "purple")
+kolory2 <- c("lightblue", "red", "pink")
+dane_yes <- subset(dane, Churn == "Yes")
+dane_no <- subset(dane, Churn == "No")
+
+hist(dane_yes$tenure, main = "tenure (Churn = Yes)", col = kolory[1], xlab = "tenure", cex.main = 0.8)
+hist(dane_no$tenure, main = "tenure (Churn = No)", col = kolory2[1], xlab = "tenure", cex.main = 0.8)
+
+```
+Dla klientów, którzy zrezygnowali, wartości tenure są często niskie – oznacza to, że wielu klientów rezygnuje w pierwszych miesiącach użytkowania. Dla klientów, którzy nie zrezygnowali, rozkład jest bardziej równomierny, a liczba klientów z długim stażem jest znacznie większa.Możemy stwierdzić, że klienci o krótkim stażu są bardziej skłonni do rezygnacji, co może wskazywać na problem z satysfakcją w początkowej fazie korzystania z usługi.
+```{r ,echo=FALSE}
+par(mfrow=c(1,2))
+hist(dane_yes$MonthlyCharges, main = "MonthlyCharges (Churn = Yes)", col = kolory[2], xlab = "MonthlyCharges", cex.main = 0.8)
+hist(dane_no$MonthlyCharges, main = "MonthlyCharges (Churn = No)", col = kolory2[2], xlab = "MonthlyCharges", cex.main = 0.8)
+
+```
+Na wykresach możemy zobaczyć że klienci, którzy zrezygnowali, częściej płacili wyższe miesięczne opłaty. Osoby, które pozostają, mają często niższe opłaty. Może to sugerować, że droższe plany są mniej atrakcyjne dla klientów lub powodują większe niezadowolenie.
+```{r ,echo=FALSE}
+par(mfrow=c(1,2))
+hist(dane_yes$TotalCharges, main = "TotalCharges (Churn = Yes)", col = kolory[3], xlab = "TotalCharges", cex.main = 0.8)
+hist(dane_no$TotalCharges, main = "TotalCharges (Churn = No)", col = kolory2[3], xlab = "TotalCharges", cex.main = 0.8)
+
+```
+Wartości TotalCharges są niskie dla Churn = Yes, co są zgodne z intuicją, ponieważ ci klienci rezygnują szybko i nie generują dużych sum płatności. Dla Churn = No widzimy szerszy zakres wartości, co jest zgodne z dłuższym czasem trwania umowy.
+\newpage
+
+## Wykresy zmiennych jakościowych dla grup
+
+```{r , echo=FALSE}
+
+par(mfrow=c(1,2))
+kolory <- c("darkblue", "darkred", "purple", "darkgreen")
+kolory2 <- c("lightblue", "red", "pink", "lightgreen")
+barplot(table(dane_yes$Contract), col = kolory[1:3], main = "Contract Length (Churn: Yes)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8)
+barplot(table(dane_no$Contract), col = kolory2[1:3], main = "Contract Length (Churn: No)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8)
+
+
+
+
+
+```
+Klienci posiadający umowy miesięczne znacznie częściej decydują się na rezygnację w porównaniu do osób, które zawarły długoterminowe umowy. Może to wynikać z faktu, że nie czują się związani z firmą oraz nie mają żadnych zobowiązań, co ułatwia zmianę dostawcy. Z kolei osoby posiadające długoterminowe zobowiązania rzadziej rezygnują, ponieważ wcześniejsze zerwanie takiej umowy często wiąże się z dodatkowymi kosztami lub karami finansowymi.
+
+```{r ,echo=FALSE}
+par(mfrow=c(1,2))
+barplot(table(dane_yes$InternetService), col = kolory[1:3], main = "Internet Service Type (Churn: Yes)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8)
+barplot(table(dane_no$InternetService), col = kolory2[1:3], main = "Internet Service Type (Churn: No)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8)
+```
+Klienci korzystający z technologii Fiber optic często rezygnują z usług. Może to sugerować, że technologia światłowodowa, wiąże się z wyższymi kosztami lub usługa nie spełnia oczekiwań, co skłania klientów do poszukiwania alternatyw. Z kolei osoby korzystające z DSL są bardziej lojalne, możliwe że ze względu na niższe opłaty lub stabilność usługi.
+```{r ,echo=FALSE}
+par(mfrow=c(1,2))
+barplot(table(dane_yes$PaymentMethod), col = kolory, main = "Payment Methods (Churn: Yes)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8)
+barplot(table(dane_no$PaymentMethod), col = kolory2, main = "Payment Methods (Churn: No)", ylab = "Number of customers",cex.names = 0.7, las = 2, cex.main = 0.8) 
+```
+Klienci korzystający z płatności elektronicznym czekiem są znacznie bardziej skłonni do rezygnacji w porównaniu reszty osób. Może to sugerować, że osoby wybierające manualne formy płatności są mniej zaangażowane w korzystanie z usługi. Z kolei automatyczne metody płatności mogą sprzyjać dłuższemu pozostawaniu w usłudze, ponieważ użytkownicy rzadziej  podejmują decyzję o zmianie dostawcy.
+
+## Największe zróżnicowanie wartości/rozkładu zmiennych w grupach
+
+Na podstawie przeprowadzonych analiz, największe zróżnicowanie wartości oraz rozkłady między grupami klientów, wykazują następujące zmienne:
+
+-`Contract` (Długość umowy): Ta zmienna pozwala na bardzo dobre rozróżnienie grup klientów. Osoby posiadające umowy miesięczne znacznie częściej rezygnują, podczas gdy klienci z umowami rocznymi i dwuletnimi pozostają znacznie bardziej lojalni. Różnice w rozkładzie są bardzo wyraźne, co czyni tę zmienną jednym z najlepszych predyktorów rezygnacji.
+
+-`PaymentMethod` (Metoda płatności): Klienci korzystający z płatności elektronicznym czekiem znacznie częściej rezygnują z usług, natomiast osoby płacące automatycznie rzadziej odchodzą. To sugeruje, że wybór mniej wygodnej formy płatności może być wskaźnikiem większego prawdopodobieństwa rezygnacji.
+
+-`InternetService` (Rodzaj usługi internetowej): Klienci korzystający z Fiber optic częściej rezygnują z usług w porównaniu do użytkowników DSL lub osób, które w ogóle nie mają internetu w ramach swojej umowy.
+
+-`MonthlyCharges` (Miesięczne opłaty): Tutaj nie mamy aż tak wyraźnych różnic, natomiast klienci z wyższymi miesięcznymi rachunkami trochę częściej rezygnują względem tych z niższymi opłatami.
+
+# Podsumowanie
+
+## Podsumowanie etapów 1-3
+Przeprowadzona analiza danych pozwoliła na identyfikację kluczowych czynników wpływających na rezygnację klientów z usług firmy telekomunikacyjnej. W etapie przygotowania danych skorygowano typ zmiennych, usunięto zbędne kolumny i przeanalizowano braki w danych. W etapie analizy opisowej zauważono, że klienci są mało wierni firmie, oraz że najpopularniejsze są dwa pakiety w firmie. Między zmiennymi ciągłymi nie zauważono wyraźnych zależności liniowych, jedynie zależności między `tenure` a `TotalCharges` przypominają liniowe. W etapie analizy z podziałem na grupy zauważono, że klienci rezygnujący z usług charakteryzują się krótszym czasem korzystania z nich, wyższymi opłatami miesięcznymi oraz niższymi opłatami całkowitymi. W przypadku zmiennych kategorycznych wykazano, że rezygnujący częściej wybierali umowy miesięczne, płatności elektronicznym czekiem oraz usługi światłowodowe.
+
+## Charakteryzacja klientów firmy
+Klienci firmy to w większości osoby w średnim wieku, z niemal równym podziałem płci, rzadko korzystające z dodatkowych usług, takich jak ochrona online czy backup. Dominują użytkownicy internetu światłowodowego, choć znacząca część nie ma w ogóle usługi internetowej w ramach oferty. Większość klientów wybiera elastyczne umowy miesięczne i faktury elektroniczne, co może wynikać z preferencji wygody i braku chęci do długoterminowych zobowiązań. Sporo klientów wybiera także czeki elektroniczne jako sposób płatności. Niski odsetek seniorów wśród klientów sugeruje, że firma może nie być wystarczająco atrakcyjna dla starszych użytkowników.
+
+## Przyczyny odchodzenia klientów
+
+Rezygnacja klientów jest silnie powiązana z krótkim czasem korzystania z usług, wysokimi opłatami miesięcznymi oraz wyborem umów miesięcznych. Klienci korzystający z internetu światłowodowego częściej odchodzą, co może wskazywać na problem z ceną lub jakością tej usługi. Dodatkowo, metoda płatności elektronicznym czekiem, wymagająca aktywnego działania klienta, może zachęcać do zmiany operatora. 
+Aby ograniczyć odchodzenie klientów, firma powinna wprowadzić programy zniżkowe skierowane do nowych klientów. Można również wprowadzić zniżki na usługi z kontraktem długoterminowym, w krótkiej perspektywie może się to wydawać nieopłacalne, jednak pomoże to zachować klientów dłużej przy sobie. Należy także zwrócić uwagę na usługi światłowodowe, gdyż może występować jakiś problem z nimi lub ich cena może być zbyt wysoka w porównaniu do jakości, a klientów decydujących się na to rozwiązanie z pewnością jest najwięcej. Można również zachęcać klientów do płatności automatycznych, ponieważ ułatwia to klientom zapłate za usługi i sprawia że większa ilość klientów zostaje. Wdrożenie programu lojalnościowego mogłoby również zwiększyć satysfakcję długoletnich klientów i zmniejszyć wskaźnik rezygnacji.
+
+
+
+

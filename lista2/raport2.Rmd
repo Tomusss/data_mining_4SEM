@@ -1,0 +1,282 @@
+---
+title: Dyskretyzacja i redukcja wymiaru na podstawie danych iris, City Quality of
+  Life Dataset, titanic_train
+author: "Tomasz Warzecha,   album 282261"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: Eksploracja danych
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+# Krótki opis zagadnienia
+
+Tutaj umieszczamy:
+
+* Co będziemy badali/analizowali?
+* Na jakie pytania chcemy znaleźć odpowiedź?
+
+# Dyskretyzacja cech ciągłych
+
+=========================================================
+## Wczytanie danych
+```{r , echo=FALSE}
+data(iris)
+library(kableExtra)
+
+struktura_danych <- sapply(iris, class)
+
+
+struktura_danych %>%
+  kbl(caption = "Struktura danych", format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+
+rozmiar_danych <- dim(iris)
+
+
+#library(kableExtra)
+#missing_summary <- colSums(is.na(iris))
+#missing_summary <- missing_summary[missing_summary > 0] # tylko kolumny z brakami
+#missing_summary %>% 
+#  kbl(caption="Brakujace dane", format="latex", digits=2) %>%
+#          kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+Nasze dane mają `r rozmiar_danych[1]` przypadków i `r rozmiar_danych[2]` cech.
+W powyższej tabeli możemy zobaczyć wszystkie cechy oraz ich typy. Widzimy, że wszystkie zmienne zostały poprawnie rozpoznane. Nasze dane mają 4 cechy numeryczne oraz jedną jakościową. W żadnej z kolumn nie mamy braku wartości. 
+
+## Wybór cech
+
+Teraz przeanalizujemy nasze dane i wybierzemy zmienną o najgorszej i najlepszej zdolności dyskryminacyjnej.
+
+```{r}
+x <- iris[,"Petal.Length"]
+n <- length(x)
+y <- runif(n) 
+library(ggplot2)
+library(gridExtra)
+p1 <- ggplot(iris, aes(x = Petal.Length)) + geom_histogram( binwidth=0.5, fill="lightblue", color="#e9ecef", alpha=0.9)
+p2 <- ggplot(iris, aes(x = Petal.Width)) + geom_histogram( binwidth=0.2, fill="lightgreen", color="#e9ecef", alpha=0.9)
+p3 <- ggplot(iris, aes(x = Sepal.Length)) + geom_histogram( binwidth=0.3, fill="darkblue", color="#e9ecef", alpha=0.9)
+p4 <- ggplot(iris, aes(x = Sepal.Width)) + geom_histogram( binwidth=0.2, fill="darkgreen", color="#e9ecef", alpha=0.9)
+grid.arrange(p1,p2,p3,p4, nrow=2)
+```
+Najbardziej symetryczny wydaje sie rozklad zmiennej `Sepal.Width`, oraz mniej `Sepal.Length`. Zmienne opisujące płatek wyraznie wybijają dla małych warości, a następnie reszta wartości ma bardziej symetryczny rozkład. Może to sugerować np. mniejsze płatki kwiatów dla jednego z gatunków co może się nam przydać w dalszej analizie.
+
+```{r}
+
+library(ggplot2)
+library(gridExtra)
+kolory <- c('lightblue','lightgreen','salmon')
+p1 <- ggplot(iris, aes(x = Species, y = Petal.Length, fill = Species)) + geom_boxplot() + theme(legend.position = "none")
+p2 <- ggplot(iris, aes(x = Species, y = Petal.Width, fill = Species)) + geom_boxplot() + theme(legend.position = "none")
+p3 <- ggplot(iris, aes(x = Species, y = Sepal.Length, fill = Species)) + geom_boxplot() + theme(legend.position = "none")
+p4 <- ggplot(iris, aes(x = Species, y = Sepal.Width, fill = Species)) + geom_boxplot() + theme(legend.position = "none")
+
+grid.arrange(p1,p2,p3,p4, nrow = 2)
+
+```
+Na powyższych wykresach pudełkowych wyraźnie widać, że zmienne dotyczące dzwonka (Sepal), nie pozwolą nam dokładnie rozgraniczyć naszych gatunków. Zdecydowanie najgorszą cechą pod tym względem jest `Sepal.Width`, której praktycznie wszystkie trzy pudełka się nakładają. Zmienne dotyczące wymiarów płatka zdecydowanie lepiej pozwolą nam zidentyfikować gatunki, natomiast przyjżyjmy się im lepiej, aby wybrać najlepszą cechę.    
+```{r}
+library(ggplot2)
+ggplot(iris, aes(x = Petal.Length, fill = Species)) +
+  geom_density(alpha = 0.5)
+
+library(ggplot2)
+ggplot(iris, aes(x = Petal.Width, fill = Species)) +
+  geom_density(alpha = 0.5)
+```
+Na powyższych wykresach rozkładu widzimy, że gatunek setosa jest dobrze rozróżnialny, natomiast versicolor i virginica delikatnie się nakładają w podobnym stopniu dla długości i szerokości (jednak tu delikatnie mniej). Natomiast przez fakt, że zmienna `Petal.Length` będzie miała wyższe statystyki, a zatem większe różnice między grupami, wybieramy tą zmienną jako najlepszą do dyskryminacji naszych danych. 
+
+## Porównanie nienadzorowanych metod dyskretyzacji
+
+```{r}
+library(arules)
+library(cluster)
+library(dplyr)
+b <- iris[,"Petal.Length"]
+w <- iris[,"Sepal.Width"]
+n <- length(b) 
+y = runif(n)
+b.disc.equal.freq <- discretize(b, breaks = 3)
+t1 <-table(b.disc.equal.freq, iris$Species)
+t1
+w.disc.equal.freq <- discretize(w, breaks = 3)
+t2 <- table(w.disc.equal.freq, iris$Species)
+```
+Powyższa tabela przedstawia nam wyniki dysktretyzacji opartej na równych częstościach
+
+```{r}
+breaks.equal.frequency <- attributes(b.disc.equal.freq)$"discretized:breaks"
+plot(b, y, col=iris$Species, main = "Metoda: equal frequency discretization")
+abline(v = breaks.equal.frequency, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+library(e1071)
+matchClasses(t1)
+
+```
+Widzimy że metoda equal frequency discretization poradziła sobie dostyć dobrze, ze zgodnością ok. 95,3% dla zmiennej `Petal.Length`. Metoda ta dobrze działa szczególnie gdy dane są równomiernie rozłożone w całym zakresie i nie mają wyraźnych skupisk.
+
+ Zobaczmy teraz jak to wygląda dla zmiennej `Sepal.Width`
+
+```{r}
+breaks.equal.frequency <- attributes(w.disc.equal.freq)$"discretized:breaks"
+plot(w, y, col=iris$Species, main = "Metoda: equal frequency discretization")
+abline(v = breaks.equal.frequency, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+library(e1071)
+matchClasses(t2)
+```
+Widzimy, że dla tej zmiennej kompletnie zawodzi dyskretyzacja. Dopasowanie jest na poziomie ok. 55,3%.
+
+Przeprowadźmy teraz analize dla dyskretyzacji opartej na przedziałach o jednakowej szerokości (ang. equal interval width)
+```{r}
+b.disc.equal.width <- discretize(b, method = "interval", breaks = 3)
+t1 <-table(b.disc.equal.width, iris$Species)
+t1
+w.disc.equal.width <- discretize(w, method = "interval", breaks = 3)
+t2 <- table(w.disc.equal.width, iris$Species)
+```
+Powyższa tabela przedstawia nam wyniki dysktretyzacji opartej na przedziałach o jednakowej szerokości
+
+
+```{r}
+breaks.equal.width <- attributes(b.disc.equal.width)$"discretized:breaks"
+plot(b, y, col=iris$Species, main = "Metoda: equal interval Width Discretization")
+abline(v = breaks.equal.width, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t1)
+```
+Widzimy, że ta metoda jest również bardzo dobra, ma zgodność na poziomie ok. 94,7%. Metoda sprawdza się przy danych o nieregularnym rozkładzie – zapewnia równą liczbę obserwacji w przedziałach, co bywa przydatne przy klasyfikacji.
+
+
+
+Sprawdźmy teraz jak wygląda ta metoda dla zmiennej `Sepal.Width`:
+
+```{r}
+breaks.equal.width <- attributes(w.disc.equal.width)$"discretized:breaks"
+plot(w, y, col=iris$Species, main = "Metoda: equal interval Width Discretization")
+abline(v = breaks.equal.width, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t2)
+```
+Dla  tej zmiennej również zgodność jest słaba, wynosi ok. 50,7%
+
+Sprawźmy teraz jak wygląda dyskretyzacja oparta na algorytmie grupowania (ang. k-means discretization)
+
+```{r}
+b.disc.k.means <- discretize(b, method = "cluster", breaks = 3)
+t1 <-table(b.disc.k.means, iris$Species)
+t1
+w.disc.k.means <- discretize(w, method = "cluster", breaks = 3)
+t2 <- table(w.disc.k.means, iris$Species)
+```
+Powyższa tabela przedstawia nam wyniki dysktretyzacji opartej na algorytmie grupowania.
+
+```{r}
+breaks.k.means <- attributes(b.disc.k.means)$"discretized:breaks"
+plot(b, y, col=iris$Species, main = "Metoda: k-means discretization")
+abline(v = breaks.k.means, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t1)
+```
+Metoda klasteryzacji jest również bardzo skuteczna, uzyskała ok.95,3% skuteczności. Najlepsza jest, gdy dane mają naturalne skupiska (klastry) – metoda dopasowuje granice do faktycznej struktury danych.
+
+Sprawdzmy teraz tę metodę dla zmiennej `Sepal.Width`:
+
+```{r}
+breaks.k.means <- attributes(w.disc.k.means)$"discretized:breaks"
+plot(w, y, col=iris$Species, main = "Metoda: k-means discretization")
+abline(v = breaks.k.means, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t2)
+```
+W tym przypadku metoda klasteryzacji poradzila sobie trochę lepiej, jednak w dalszym ciągu dopasowanie jest na poziomie 56%, co jest słabym wynikiem. 
+
+Teraz przejdźmy do dyskretyzacji z przedziałami zadanymi przez użytkownika.
+
+```{r}
+b.disc.user <- discretize(b, method = "fixed", 
+      breaks = c(-Inf, 2, 5, Inf), labels = c("small","medium", "large"))
+w.disc.user <- discretize(w, method = "fixed", 
+      breaks = c(-Inf, 2.9, 3.2, Inf), labels = c("small","medium", "large"))
+t1 <- table(b.disc.user, iris$Species)
+t1
+t2 <- table(w.disc.user, iris$Species)
+
+```
+Powyższa tabela przedstawia nam wyniki dysktretyzacji opartej na przedziałach zadanych przez użytkownika.
+
+```{r}
+breaks.user <- c(-Inf, 2, 5, Inf)
+plot(b, y, col=iris$Species, main = "Metoda: fixed (user provided breaks)")
+abline(v = breaks.user, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t1)
+
+```
+W tej metodzie uzyskujemy zgodność na poziomie ok.94,7%. Największym minusem tej metody jest konieczność wprowadzania granic przez użytkownika, co w większości przypadków jest trudne i męczące. Jednak w niektórych typach danych, gdzie są one oddalone od siebie i mają specyficzne wartości taka metoda również może się przydać
+
+Sprawdźmy teraz co dostaniemy dla zmiennej `Sepal.Width`
+
+```{r}
+breaks.user <- c(-Inf, 2.9, 3.2, Inf)
+plot(w, y, col=iris$Species, main = "Metoda: fixed (user provided breaks)")
+abline(v = breaks.user, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+matchClasses(t2)
+```
+W tej metodzie dla zmiennej opisującej szerokość działki dostajemy niezadowalający wynik. 
+
+## Podsumowanie 
+Na podstawie przeprowadzonych analiz widać wyraźnie, że skuteczność dyskretyzacji mocno zależy od tego, jak dobrze dana cecha rozróżnia gatunki. Dla zmiennej `Petal.Length`, którą wybraliśmy jako najlepszą (bo najłatwiej było na jej podstawie rozróżnić gatunki), praktycznie każda metoda dała bardzo dobre wyniki – zgodność sięgała nawet 95%. Zarówno metody równej szerokości, równej liczności, k-means, jak i ta z ręcznymi progami, działały podobnie dobrze. To pokazuje, że jak mamy dobrą cechę, to nawet prosta metoda może nam dać dobre rezultaty.
+
+Z kolei dla zmiennej Sepal.Width, która słabo odróżnia gatunki (pudełka się na siebie nakładały, nie było wyraźnych różnic), wszystkie metody wypadały raczej słabo – zgodność była na poziomie około 50–56%, niezależnie od wybranej metody. W skrócie: jeśli cecha jest zła, to żadna metoda dyskretyzacji jej nie „naprawi”.
+
+Podsumowując – najlepsze wyniki osiągamy wtedy, gdy dobra cecha zostaje sparowana z odpowiednią metodą dyskretyzacji – choć w praktyce wybór metody ma mniejsze znaczenie niż wybór właściwej cechy.
+
+
+
+
+
+
+
+
+# PCA - analiza składowych głównych
+
+=========================================================
+
+
+
+# MSD - skalowanie wielowymiarowe
+
+=========================================================
+
+
+
+## Podsumowanie
+Najważniejsze wnioski, jakie udało się wysnuć na podstawie przeprowadzonych analiz/eksperymentów. Wnioski mogą być wypunktowane, tzn.:
+
+* Tutaj wniosek nr 1
+* Tutaj wniosek nr 2
+* .....
+
+

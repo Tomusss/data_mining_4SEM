@@ -1,0 +1,1233 @@
+---
+title: Klasyfikacja na bazie modelu regresji liniowej oraz porównanie metod klasyfikacji na podstawie danych iris, Glass
+author: "Tomasz Warzecha,   album 282261"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[OT4]{polski}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: Eksploracja danych
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  encoding = "UTF-8",
+  comment = "",
+  warning = FALSE,
+  message = FALSE
+)
+options(encoding = "UTF-8")
+Sys.setlocale("LC_ALL", "Polish")
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(results = "asis")
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+
+
+# Klasyfikacja na bazie modelu regresji liniowej
+
+========================================================= 
+
+W tym zadaniu pracujemy na danych iris (R-pakiet datasets). Zbiór danych zawiera wyniki pomiarów uzyskanych dla trzech gatunków irysów (tj. setosa, versicolor i virginica) i został udostępniony przez Ronalda Fishera w roku 1936.Pomiary dotyczą długości oraz szerokości dwóch różnych części kwiatu – działki kielicha (ang. sepal) oraz płatka (ang. petal).
+
+## Analizowane dane
+
+```{r}
+data(iris)
+library(kableExtra)
+
+struktura_danych <- sapply(iris, class)
+
+
+struktura_danych %>%
+  kbl(caption = "Struktura danych", format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "HOLD_position"))
+
+rozmiar_danych <- dim(iris)
+
+
+#library(kableExtra)
+#missing_summary <- colSums(is.na(iris))
+#missing_summary <- missing_summary[missing_summary > 0] # tylko kolumny z brakami
+#missing_summary %>% 
+#  kbl(caption="Brakujace dane", format="latex", digits=2) %>%
+#          kable_styling(latex_options = c("striped", "HOLD_position"))
+```
+Nasze dane mają `r rozmiar_danych[1]` przypadków i `r rozmiar_danych[2]` cech. W powyższej tabeli możemy zobaczyć wszystkie cechy oraz ich typy. Widzimy, że wszystkie zmienne zostały poprawnie rozpoznane. Nasze dane mają 4 cechy numeryczne oraz jedną jakościową. W żadnej z kolumn nie mamy braku wartości.
+
+## Podzieł danych na zbiór uczący i testowy
+
+```{r}
+data <- iris
+n <- dim(data)[1]
+set.seed(123)
+learn.indx <- sample(1:n,2/3*n)
+learn.set  <- data[learn.indx,] 
+test.set   <- data[-learn.indx,] 
+```
+W tym kroku wykonujemy podział naszych danych na zbiór uczący oraz testowy. Zbiór uczący zawiera ok. 2/3 przypadków, a testowy 1/3. Dane zostały przydzielone losowo.  
+
+```{r , fig.height=7, fig.width=9}
+etykietki.klas <-  learn.set$Species
+t.etykietki.klas <-  test.set$Species
+
+# liczba obiektów
+n <- length(etykietki.klas)
+par(mfrow = c(1,2))
+plot(etykietki.klas, main="Zbiór uczący - liczebności klas")
+plot(t.etykietki.klas, main="Zbiór testowy - liczebności klas")
+
+```
+Na powyższych wykresach widzimy rozkład gatunków w obu zbiorach. Widzimy że dane został wylosowane w odpowiedni sposób, liczebności klas zostały dobrze rozdysponowane. 
+
+## Konstrukcja klasyfikatora i wyznaczenie prognoz
+W tym kroku zastosujemy model regresji liniowej do konstrukcji klasyfikatora na podstawie danych uczących. Wyznaczymy K niezależnych modeli (jednowymiarowych) dla poszczególnych klas, wykorzystamy w tym celu funkcje $lm()$. Następnie wyznaczymy prognozowane etykietki dla danych ze zbioru uczącego i testowego. 
+
+
+```{r}
+
+
+Y1_train <- as.numeric(learn.set$Species == "setosa")
+Y2_train <- as.numeric(learn.set$Species == "versicolor")
+Y3_train <- as.numeric(learn.set$Species == "virginica")
+
+# dopasowanie K=3 niezależnych modeli regresji liniowej
+mod1 <- lm(Y1_train ~ ., data = learn.set[, 1:4])
+mod2 <- lm(Y2_train ~ ., data = learn.set[, 1:4])
+mod3 <- lm(Y3_train ~ ., data = learn.set[, 1:4])
+
+# prognozowanie zmiennej zależnej (prognozowane p-stwo a posteriori)
+pred1 <- predict(mod1, newdata = learn.set[, 1:4])
+pred2 <- predict(mod2, newdata = learn.set[, 1:4])
+pred3 <- predict(mod3, newdata = learn.set[, 1:4])
+
+tpred1 <- predict(mod1, newdata = test.set[, 1:4])
+tpred2 <- predict(mod2, newdata = test.set[, 1:4])
+tpred3 <- predict(mod3, newdata = test.set[, 1:4])
+
+tpred <- rep(1, length(tpred1))
+tpred[tpred2 > pmax(tpred1, tpred3)] <- 2
+tpred[tpred3 > pmax(tpred1, tpred2)] <- 3
+
+pred <- rep(1, length(pred1))
+pred[pred2 > pmax(pred1, pred3)] <- 2
+pred[pred3 > pmax(pred1, pred2)] <- 3
+
+class_names <- c("setosa", "versicolor", "virginica")
+pred_species <- factor(class_names[pred], levels = levels(learn.set$Species))
+tpred_species <- factor(class_names[tpred], levels = levels(learn.set$Species))
+
+
+
+```
+
+## Ocena jakości modelu
+
+Teraz wyznaczymy macierz pomyłek oraz błąd klasyfikacji na zbiorze uczącym oraz zbiorze testowym.
+```{r ,fig.height=7, fig.width=9}
+conf_matrix <- table(Predicted = pred_species, Actual = learn.set$Species)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+tconf_matrix <- table(Predicted = tpred_species, Actual = test.set$Species)
+taccuracy <- sum(diag(tconf_matrix)) / sum(tconf_matrix)
+
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf_matrix), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(tconf_matrix), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+
+
+```
+Na przedstawionych macierzach pomyłek widzimy rezultaty klasyfikacji dla dwóch zbiorów danych: testowego i uczącego. Możemy stwierdzić, że model bardzo dobrze radzi sobie z rozpoznawaniem gatunku setosa, osiągając 100% trafności zarówno w zbiorze uczącym, jak i testowym. x Największe trudności pojawiają się w rozróżnianiu gatunków versicolor i virginica. W szczególności model często myli versicolor z virginica, co widać zwłaszcza w zbiorze uczacym, gdzie aż połowa przypadków versicolor została błędnie sklasyfikowana. 
+
+Błąd klasyfikatora na zbiorze uczącym wynosi: `r accuracy`, natomiast na zbiorze testowym: `r taccuracy`. Wyniki w zbiorze testowym są porównywalne do tych uzyskanych na zbiorze uczącym, co sugeruje, że model nie uległ przeuczeniu.
+
+Może tu występować zjawisko maskowania klas, w którym jedna klasa (w tym przypadku virginica) "przykrywa" drugą (versicolor), przez co model częściej przypisuje dane obserwacje do silniej reprezentowanej lub lepiej dopasowanej klasy. Spróbujmy się temu przyjrzeć poprzez zbadanie rozkładów w przestrzeni cech.
+
+
+```{r}
+library(GGally)
+library(gridExtra)
+ggpairs(iris, columns = 1:4, 
+        aes(color = Species, alpha = 0.5),
+        upper = list(continuous = "points"),
+        lower = list(continuous = "points"),
+        diag = list(continuous = "densityDiag")) +
+  theme_bw() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1") +
+theme(legend.position = "bottom")
+
+```
+Na powyższych wykresach widzimy, że setosa (czerwony) jest dobrze rozróżnialna, szczególnie dla zmiennych dotyczacych Petal, natomiast rozkłady pozostałych dwóch gatunktów nakładają się, szczególnie zmienne `Sepal.Length` oraz `Sepal.Width` w której rozłady versicolor oraz virginica są niemal identyczne, co wpływa na maskowanie klas. Ta cecha ma niską moc klasyfikacyjną i może być źródłem błędów klasyfikatora.
+
+## Budowa modelu liniowego dla rozszerzonej przestrzeni cech
+
+Spróbujmy rozszerzyć nasz model o składniki wielomianowe stopnia 2 (tzn.: $PL^2$, $PW^2$, $SL^2$, $SW^2$, $PL * PW$, $PL * SW$, $PL * SL$, $PW * SL$, $PW * SW$, $SL * SW$). Znowu wyznaczymy model dla zbioru uczącego (2/3 przypadków), następnie przetestujemy go na zbiorze testowym i uczącym. Przypadki zostaną wybrane losowo korzystając z tego samego ziarna co w poprzednim modelu aby zachować wiarygodność wyników. 
+
+
+```{r , fig.height=7, fig.width=9}
+
+iris.new <- iris 
+names(iris.new) <- c("SL","SW","PL","PW","Spec")
+iris.new <- transform(iris.new, SL.SW=SL*SW,  PL.PW=PL*PW, PL.SL=PL*SL, PL.SW=PL*SW, PW.SW=PW*SW, PW.SL=PW*SL, PL2=PL*PL, PW2=PW*PW, SL2=SL*SL, SW2=SW*SW)
+set.seed(123)
+ind <- sample(1:nrow(iris.new), size = 0.66 * nrow(iris.new))
+train <- iris.new[ind, ]
+test  <- iris.new[-ind, ]
+train1 <- train[,-5]
+Y1.train <- as.numeric(train$Spec == "setosa")
+Y2.train <- as.numeric(train$Spec == "versicolor")
+Y3.train <- as.numeric(train$Spec == "virginica")
+
+# Dopasowanie modeli regresji
+mod1 <- lm(Y1.train ~ ., data = train[,-5])
+mod2 <- lm(Y2.train ~ ., data = train[,-5])
+mod3 <- lm(Y3.train ~ ., data = train[,-5])
+
+# Predykcje na zbiorze uczacym
+pred1 <- predict(mod1, newdata = train)
+pred2 <- predict(mod2, newdata = train)
+pred3 <- predict(mod3, newdata = train)
+pred_class <- rep(1, length(pred1))
+pred_class[pred2 > pmax(pred1, pred3)] <- 2
+pred_class[pred3 > pmax(pred1, pred2)] <- 3
+
+tpred1 <- predict(mod1, newdata = test)
+tpred2 <- predict(mod2, newdata = test)
+tpred3 <- predict(mod3, newdata = test)
+tpred_class <- rep(1, length(tpred1))
+tpred_class[tpred2 > pmax(tpred1, tpred3)] <- 2
+tpred_class[tpred3 > pmax(tpred1, tpred2)] <- 3
+
+class_names <- c("setosa", "versicolor", "virginica")
+tpred_species <- factor(class_names[tpred_class], levels = levels(test$Spec))
+pred_species <- factor(class_names[pred_class], levels = levels(test$Spec))
+
+# Macierz pomyłek i dokładność
+conf_matrix <- table(Predicted = pred_species, Actual = train$Spec)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+tconf_matrix <- table(Predicted = tpred_species, Actual = test$Spec)
+taccuracy <- sum(diag(tconf_matrix)) / sum(tconf_matrix)
+
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf_matrix), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(tconf_matrix), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+```
+Na wykresach powyżej widzimy macierze pomyłek dla zbioru testowego i uczącego. Jak widzimy znacząco poprawiliśmy jakość naszego modelu, jedynie dwa przypadki zostały błędnie sklasyfikowane przez nasz model. W zbiorze uczącym jeden przypadek został sklasyfikowany jako gatunek versicolor zamiast viginica, oraz odwrotnie w zbiorze testowym, jeden przypadek został sklasyfikowany jako virginica, a w rzeczywistości był to versicolor. Oznacza to, że nasze cechy stopnia 2 są na tyle charakterystyczne, że model klasyfikuje gatunki niemal idealnie, z błędem na poziomie: `r accuracy`, `r taccuracy`, odpowiednio w zbiorach uczącym i testowym. Wyniki w zbiorze testowym są porównywalne do tych uzyskanych na zbiorze uczącym, co sugeruje, że model nie uległ przeuczeniu.
+
+Pozbyliśmy się również problemu maskowania klas. Zmienne które dodaliśmy, skutecznie rozróżniały nasze gatunki. W szczególności poprawiliśmy skuteczność rozrózniania gatunku virginica oraz versicolor. 
+
+## Podsumowanie 
+
+Nasz początkowy model oparty wyłącznie na cechach gatunków radził sobie dobrze jedynie z gatunkiem setosa, w pozostałych przypadkach jakość pozostawiała wiele do życzenia. Nasze cechy nie rozróżniały wystarczająco dobrze dwóch pozostałych gatunków, dlatego zdecydowaliśmy się wprowadzić wielomiany stopnia 2 naszych cech, tak aby spróbować poprawić skuteczność modelu. Przyniosło to bardzo dobre efekty, skuteczność naszego modelu znacząco wzrosła i jednynie w dwóch przypadkach model błędnie ocenił gatunek.   
+
+
+# Porównanie metod klasyfikacji 
+
+## Wybór i zapoznanie się z danymi 
+
+W tym zadaniu pracujemy na danych Glass (R-pakiet mlbench). Zbiór danych Glass charakteryzuje się złożoną strukturą klas oraz wyraźnymi różnicami w rozkładach cech chemicznych. W przeciwieństwie do prostych zbiorów jak iris, tutaj efekt maskowania klas jest silniejszy, a nierównowaga klas wymaga specjalnego podejścia.
+
+```{r}
+library(mlbench)
+dane <- data("Glass", package = "mlbench")
+library(mlbench)
+dane <- Glass
+#dane
+# Sprawdzenie struktury danych
+#str(Glass)
+colSums(is.na(dane))  # Brak brakujących wartości w oryginalnym zbiorze
+ 
+```
+Zbiór danych Glass zawiera 214 przypadków opisujących różne rodzaje szkła na podstawie ich składu chemicznego. Każdy przypadek charakteryzuje się 9 cechami numerycznymi, w tym zawartością pierwiastków takich jak sód (Na), magnez (Mg), glin (Al), krzem (Si), potas (K), wapń (Ca), bar (Ba), żelazo (Fe) oraz współczynnikiem załamania światła (RI). Klasyfikacja odbywa się na podstawie zmiennej Type, która określa typ szkła i przyjmuje 6 różnych wartości (od 1 do 6).
+
+Nasze dane nie posiadają żadnych braków danych, brak występowania danego pierwiastka w danym rodzaju szkła oznaczany jest jako 0.0 zatem nie przeszkadza nam to w dalszej analizie. 
+
+Wszystkie typy zmiennych są numeryczne, z wyjątkiem zmiennej Type zawierającej etykietki naszych klas, która jest zmienną typu factor
+
+## Wstępna analiza danych
+
+```{r}
+klasa.tab <- prop.table(table(Glass$Type))
+barplot(klasa.tab, col=rainbow(6), main="Rozkład typów szkła")
+
+klasa.licznosci <- table(Glass$Type)
+max_licznosc <- max(klasa.licznosci)
+n <- sum(klasa.licznosci)
+blad_klasyfikacji <- (n - max_licznosc) / n
+
+```
+Widzimy na powyższym, że rozkład klas jest silnie niezrównoważony. Klasa 2 dominuje z ok. 35% przypadków, podczas gdy klasa 6 stanowi zaledwie 4.2% zbioru. Przypisując wszystkie obiekty do najczęstszej klasy, otrzymalibyśmy błąd klasyfikacji na poziomie 64%, co wskazuje na znaczną dysproporcję w danych.
+
+```{r}
+numeric.features <- sapply(Glass, is.numeric)
+data.pca <- Glass[, numeric.features]
+
+par(las=3, mar=c(8,4,4,2)+0.1)
+boxplot(data.pca, col=rainbow(9), main="Rozkład cech przed standaryzacją")
+par(las=1, mar=c(5,4,4,2)+0.1)
+```
+Wykres pokazuje wyraźne różnice w skalach i rozproszeniu poszczególnych cech. Tak duże różnice w wariancji sugerują konieczność standaryzacji przed zastosowaniem metod wrażliwych na skalę, takich jak k-NN.
+
+```{r}
+dane_st <- scale(data.pca)
+par(las=3, mar=c(8,4,4,2)+0.1)
+boxplot(dane_st, col=rainbow(9), main="Rozkład cech po standaryzacji")
+par(las=1, mar=c(5,4,4,2)+0.1)
+```
+Na powyższym wykresie widać, że po standaryzacji wszystkie cechy mają podobny zakres wartości, co ułatwi porównywanie ich wpływu na klasyfikację.
+
+```{r, fig.height=10, fig.width=12}
+library(ggplot2)
+library(dplyr)
+
+
+plots <- list()
+for(cecha in names(Glass)[1:9]){
+  plots[[cecha]] <- ggplot(Glass, aes_string(x="Type", y=cecha, fill="Type")) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(title=cecha) +
+    theme(legend.position="none")
+}
+
+# Wyświetlenie wykresów
+gridExtra::grid.arrange(grobs=plots, ncol=3)
+
+```
+Na powyższym rysunku widzimy wykresy pudełkowe dla wszystkich zmiennych. Możemy zauważyć, że Mg dobrze rozróżnia klasy 5,6,7 względem 1,2,3. Również Al ładnie dzieli nasze zmienne. We współczynniku RI również mamy zróznicowane rozkłady zmiennych. Warto także popatrzeć na zmienną Ba, która bardzo dobrze wyróżnia klasę 7. Fe podobnie dzieli nasz zbiór jak Mg, warto jeszcze popatrzeć na Ca, które szczególnie różnicuje klasę 5. Pierwiastki Si, K, Na mają dosyć małe zróznicowanie. 
+
+Spróbójmy jeszcze popatrzeć na wykresy mozaikowe.
+```{r ,fig.height=10, fig.width=12}
+library(ggmosaic)
+library(purrr)
+library(gridExtra)
+
+Glass_disc <- Glass
+for(col in names(Glass)[1:9]) {
+  Glass_disc[[col]] <- cut(Glass[[col]], breaks = 3, 
+                          labels = c("niski", "średni", "wysoki"))
+}
+
+create_ggmosaic <- function(feature) {
+  ggplot(data = Glass_disc) +
+    geom_mosaic(aes_string(x = paste("product(", feature, ")"), fill = "Type")) +
+    labs(title = feature) +
+    theme_mosaic() +
+    theme(legend.position = "none",
+          axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+plots <- map(names(Glass)[1:9], create_ggmosaic)
+
+do.call(grid.arrange, c(plots, ncol = 3))
+
+```
+
+Tutaj również widzimy najlepsze zróżnicowanie u podobnych cech. Wyróżniają się przede wszystkim Mg i RI, ale także Al czy Ca. Słabo radzą sobie szczególnie K czy Si. 
+
+Podsumowując, największe zdolności dyskryminacyjne mają cechy: Mg, RI, Ba, Al, Ca, natomiast gorzej radzą sobie pierwiastki: K, Si, Na, Fe
+
+# Budowa modeli klasyfikacyjnych
+
+## Podział na zbiór testowy i uczący
+
+Nasze modele będziemy trenować na losowo wybranym zbiorze uczącym, a następnie testować na nim oraz na zbiorze testowym. Zbiory zostały wybrane losowo w oparciu o ustalone ziarno "123", w proporcjach 2/3, 1/3 odpowienio dla zbioru uczącego i testowego. 
+```{r}
+set.seed(123)
+n <- dim(dane)[1]
+numeric.features <- sapply(dane, is.numeric)
+data.pca <- dane[, numeric.features]
+dane_stand <- scale(data.pca)
+
+dane_stand_df <- as.data.frame(dane_stand)
+dane_stand_df$Type <- dane$Type
+
+learn.indx <- sample(1:n,2/3*n)
+
+learn.set  <- dane[learn.indx,] # zbiór uczący
+test.set   <- dane[-learn.indx,] # zbiór testowy
+
+stand.learn.set<- dane_stand_df[learn.indx,] # zbiór uczący
+stand.test.set   <- dane_stand_df[-learn.indx,] # zbiór testowy
+
+
+
+```
+
+## Klasyfikacja - k-najbliższych sąsiadów
+
+Do tej metody, dane zostały zestandaryzowane, ponieważ opiera się ona na odelgłościach, gdzie zmienne o większych zmiennościach dominowałyby. Aby uniknąć takiej sytuacji zastosowana została standaryzacja.
+
+### Różny dobór parametrów 
+
+Na początku zbadajmy dokładność metody dla 2 najbliższych sąsiadów.
+
+
+```{r, fig.height=7, fig.width=9 }
+library(class)
+set.seed(123)
+
+etykietki.rzecz <- stand.test.set$Type
+etykietki.prog <- knn(stand.learn.set[, -10], stand.test.set[, -10], cl = stand.learn.set$Type, k = 2)
+
+etykietki.uczace.rzecz <- stand.learn.set$Type
+etykietki.uczace.prog <- knn(stand.learn.set[, -10], stand.learn.set[, -10], cl = stand.learn.set$Type, k = 2)
+
+wynik.tablica <- table(etykietki.uczace.prog,etykietki.uczace.rzecz)
+
+# błąd klasyfikacji
+n.test <- dim(stand.learn.set)[1]
+blad <- (n.test - sum(diag(wynik.tablica))) / n.test
+twynik.tablica <- table(etykietki.prog,etykietki.rzecz)
+blad <- round(blad,2)
+# błąd klasyfikacji
+tn.test <- dim(stand.test.set)[1]
+tblad <- (tn.test - sum(diag(twynik.tablica))) / tn.test
+tblad <- round(tblad,2)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(wynik.tablica), 
+  target_col = "etykietki.uczace.prog", 
+  prediction_col = "etykietki.uczace.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(twynik.tablica), 
+  target_col = "etykietki.prog", 
+  prediction_col = "etykietki.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+
+```
+Jak widzimy na macierzach pomyłek, metoda nie przyniosła najlepszych rezultatów, szczególnie dla zbioru testowego. Błędy w tym przypadku wynoszą: `r blad`, `r tblad`, odpowiednio dla zbioru uczącego i testowego. 
+
+Zobaczmy teraz wersję dla 5 najbliższych sąsiadów
+
+```{r, fig.height=7, fig.width=9}
+set.seed(123)
+
+etykietki.rzecz <- stand.test.set$Type
+etykietki.prog <- knn(stand.learn.set[, -10], stand.test.set[, -10], cl = stand.learn.set$Type, k = 5)
+
+etykietki.uczace.rzecz <- stand.learn.set$Type
+etykietki.uczace.prog <- knn(stand.learn.set[, -10], stand.learn.set[, -10], cl = stand.learn.set$Type, k = 5)
+
+wynik.tablica <- table(etykietki.uczace.prog,etykietki.uczace.rzecz)
+
+# błąd klasyfikacji
+n.test <- dim(stand.learn.set)[1]
+blad <- (n.test - sum(diag(wynik.tablica))) / n.test
+twynik.tablica <- table(etykietki.prog,etykietki.rzecz)
+blad <- round(blad,2)
+# błąd klasyfikacji
+tn.test <- dim(stand.test.set)[1]
+tblad <- (tn.test - sum(diag(twynik.tablica))) / tn.test
+tblad <- round(tblad,2)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(wynik.tablica), 
+  target_col = "etykietki.uczace.prog", 
+  prediction_col = "etykietki.uczace.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(twynik.tablica), 
+  target_col = "etykietki.prog", 
+  prediction_col = "etykietki.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+
+```
+
+Jak widzimy na macierzach pomyłek, metoda nie przyniosła poprawy, a nawet się pogorszyła. Błędy w tym przypadku wynoszą: `r blad`, `r tblad`, odpowiednio dla zbioru uczącego i testowego. 
+
+Zobaczmy jeszcze dla 7 sąsiadów
+
+```{r, fig.height=7, fig.width=9}
+set.seed(123)
+
+etykietki.rzecz <- stand.test.set$Type
+etykietki.prog <- knn(stand.learn.set[, -10], stand.test.set[, -10], cl = stand.learn.set$Type, k = 7)
+
+etykietki.uczace.rzecz <- stand.learn.set$Type
+etykietki.uczace.prog <- knn(stand.learn.set[, -10], stand.learn.set[, -10], cl = stand.learn.set$Type, k = 7)
+
+wynik.tablica <- table(etykietki.uczace.prog,etykietki.uczace.rzecz)
+
+# błąd klasyfikacji
+n.test <- dim(stand.learn.set)[1]
+blad <- (n.test - sum(diag(wynik.tablica))) / n.test
+twynik.tablica <- table(etykietki.prog,etykietki.rzecz)
+blad <- round(blad,2)
+# błąd klasyfikacji
+tn.test <- dim(stand.test.set)[1]
+tblad <- (tn.test - sum(diag(twynik.tablica))) / tn.test
+tblad <- round(tblad,2)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(wynik.tablica), 
+  target_col = "etykietki.uczace.prog", 
+  prediction_col = "etykietki.uczace.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(twynik.tablica), 
+  target_col = "etykietki.prog", 
+  prediction_col = "etykietki.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+
+```
+Jak widzimy na macierzach pomyłek, metoda jeszcze pogorszyła rezultaty. Błędy w tym przypadku wynoszą: `r blad`, `r tblad`, odpowiednio dla zbioru uczącego i testowego. 
+
+### Różny dobór zmiennych
+
+Przetestujmy teraz jak wpływają różne kombinacje (podzbiory) zmiennych wykorzystanych do konstrukcji klasyfikatorów, w szczególności wszystkie zmienne oraz wybrany podzbiór zmiennych o najlepszej zdolności
+dyskryminacyjnej.
+
+W naszym przypadku będziemy brali pod uwagę metodę 2 najbliższych sąsiadów i przetestujemy ją na zmiennych o najlepszej zdolności dyskryminacyjnej tj. Mg, RI, Ba, Al. Następnie porównamy otrzymany wynik z błędami dla wszystkich danych. 
+
+```{r, fig.height=7, fig.width=9}
+set.seed(123)
+zmienne_wybrane <- c("Mg", "RI", "Ba", "Al", "Type" )
+
+learn_subset <- stand.learn.set[, zmienne_wybrane]
+test_subset <- stand.test.set[, zmienne_wybrane]
+
+etykietki.rzecz <- test_subset$Type
+etykietki.prog <- knn(learn_subset[,-5], test_subset[,-5], cl = learn_subset$Type, k = 2)
+
+etykietki.uczace.rzecz <- learn_subset$Type
+etykietki.uczace.prog <- knn(learn_subset[, -5], learn_subset[, -5], cl = learn_subset$Type, k = 2)
+
+wynik.tablica <- table(etykietki.uczace.prog,etykietki.uczace.rzecz)
+
+# błąd klasyfikacji
+n.test <- dim(stand.learn.set)[1]
+blad <- (n.test - sum(diag(wynik.tablica))) / n.test
+twynik.tablica <- table(etykietki.prog,etykietki.rzecz)
+blad <- round(blad,2)
+# błąd klasyfikacji
+tn.test <- dim(stand.test.set)[1]
+tblad <- (tn.test - sum(diag(twynik.tablica))) / tn.test
+tblad <- round(tblad,2)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(wynik.tablica), 
+  target_col = "etykietki.uczace.prog", 
+  prediction_col = "etykietki.uczace.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(twynik.tablica), 
+  target_col = "etykietki.prog", 
+  prediction_col = "etykietki.rzecz",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+
+```
+Jak widzimy na macierzach pomyłek, znacząco nie poprawiliśmy rezultatów, jedynie dla zbioru uczącego poprawa była widoczna, natomiast dla zbioru testowego dokładność pozostała bez zmian. Błędy w tym przypadku wynoszą: `r blad`, `r tblad`, odpowiednio dla zbioru uczącego i testowego. 
+
+Dokładność została sprawdzona również dla mniejszejych podzbiorów cech, jednak tylko pogorszyły one rezultaty. 
+
+
+### Podsumowanie
+
+Dane w użytej metodzie zostały podzielone na zbiór uczący i testowy, a jako miary oceny użyto macierzy pomyłek oraz błędów klasyfikacji.Na podstawie przeprowadzonych eksperymentów z metodą k-najbliższych sąsiadów (k-NN) można stwierdzić, że skuteczność klasyfikacji zależy zarówno od liczby sąsiadów (k), jak i od doboru zmiennych, jednak nie zmienia to w naszym przypadku za dużo, szczególnie dla zbioru testowego. 
+
+Wyniki pokazały, że wielkość błędu zależy od prawidłowego doboru liczby sąsiadów. W naszych danych najlepszym parametrem k z liczb 2,5 i 7, okazała się wartość k = 2. Wtedy osiągnięto łącznie najmniejszy błąd dla zbioru testowego - 19%, jak i uczącego - 39%.
+
+Dodatkowo sprawdzono skuteczność klasyfikacji przy użyciu tylko czterech najbardziej istotnych zmiennych (Mg, RI, Ba, Al). Wyniki były najlepsze dla zbioru testowego, gdy pod uwagę wzięto cały zbiór (39%), natomiast błąd dla zbioru uczącego wyszedł najmniejszy dla zbioru czterech zmiennych - 10%.
+
+Można się zastanawiać, czy model nie został w tym przypadku przeuczony, natomiast większe liczby sąsiadów dawały coraz gorsze wyniki zarówno dla zbioru testowego jak i uczącego.
+
+## Metoda drzew klasyfikacyjnych
+
+W tej metodzie skorzystamy z surowych danych z naszego zbioru, bez standaryzacji.
+
+### Drzewa klasyfikacyjne dla różnych parametrów
+```{r , fig.width= 10, fig.height=12}
+set.seed(123) 
+library(rpart)
+library(rpart.plot)
+n <- nrow(dane)
+learning.set.index <- sample(1:n,2/3*n)
+learning.set <- dane[learning.set.index,]
+test.set     <- dane[-learning.set.index,]
+n.learning <- nrow(learning.set)
+n.test <- nrow(test.set)
+model <- Type ~ .
+
+# Budowa drzewa decyzyjnego z domyślnymi parametrami
+tree.simple <- rpart(model, data = learning.set)
+
+# Informacje o modelu
+##print(tree.simple)
+##summary(tree.simple)
+
+# Wizualizacja drzewa
+##plot(tree.simple)
+##text(tree.simple, cex = 0.7, use.n = TRUE)
+
+# Zaawansowana wizualizacja
+rpart.plot(tree.simple)
+
+# Prognozy etykiet klas
+pred.labels.learning <- predict(tree.simple, newdata = learning.set, type = "class")
+pred.labels.test <- predict(tree.simple, newdata = test.set, type = "class")
+
+# Prognozy prawdopodobieństw
+pred.probs.test <- predict(tree.simple, newdata = test.set, type = "prob")
+
+# Wyświetlenie wyników
+##head(pred.labels.learning)
+##head(pred.labels.test)
+##head(pred.probs.test)
+t <- learning.set$Type
+tt <- test.set$Type
+# macierz pomyłek (confusion matrix)
+conf.mat.learning <- table(pred.labels.learning, t)
+
+conf.mat.test <- table(pred.labels.test, tt)
+
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+blad <- (n.learning - sum(diag(conf.mat.learning))) / n.learning
+tblad <- (n.test - sum(diag(conf.mat.test))) / n.test
+blad <- round(blad,2)
+tblad <- round(tblad,2)
+
+
+
+```
+Na powyższym rysunku możemy zobaczyć konstrukcję drzewa klasyfikacyjnego
+
+```{r, fig.height=7, fig.width=9}
+library(cvms)
+library(ggplot2)
+library(patchwork)
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.learning), 
+  target_col = "pred.labels.learning", 
+  prediction_col = "t",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.test), 
+  target_col = "pred.labels.test", 
+  prediction_col = "tt",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+```
+Powyżej na macierzach odmienności widzimy, jak zachowywał się nasz model. Otrzymaliśmy błędy na poziomie: `r blad`, `r tblad`, odpowiednio dla zbioru uczącego i testowego.
+
+Spróbujmy stworzyć teraz drzewo z innymi parametrami niż standardowe:
+
+```{r ,fig.height=10, fig.width=12}
+set.seed(123) 
+
+
+# Budowa drzewa decyzyjnego z domyślnymi parametrami
+tree.change <- rpart(model, data=learning.set, control=rpart.control(cp=.02, minsplit=8, maxdepth=7))
+
+# Informacje o modelu
+##print(tree.change)
+##summary(tree.change)
+
+# Wizualizacja drzewa
+##plot(tree.change)
+##text(tree.change, cex = 0.7, use.n = TRUE)
+
+# Zaawansowana wizualizacja
+rpart.plot(tree.change)
+
+# Prognozy etykiet klas
+pred.labels.learning <- predict(tree.change, newdata = learning.set, type = "class")
+pred.labels.test <- predict(tree.change, newdata = test.set, type = "class")
+
+# Prognozy prawdopodobieństw
+pred.probs.test <- predict(tree.change, newdata = test.set, type = "prob")
+
+# Wyświetlenie wyników
+##head(pred.labels.learning)
+##head(pred.labels.test)
+##head(pred.probs.test)
+t <- learning.set$Type
+tt <- test.set$Type
+# macierz pomyłek (confusion matrix)
+conf.mat.learning <- table(pred.labels.learning, t)
+
+conf.mat.test <- table(pred.labels.test, tt)
+
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+blad <- (n.learning - sum(diag(conf.mat.learning))) / n.learning
+tblad <- (n.test - sum(diag(conf.mat.test))) / n.test
+blad <- round(blad,2)
+tblad <- round(tblad,2)
+
+```
+
+Powyżej mamy skonstruowane drzewo z parametrami: cp=.02, minsplit=8, maxdepth=7. Są to zoptymalizowane parametry dla których łączna suma błędów na zbiorze uczącym i testowym wynosi odpowiednio: `r blad`, `r tblad`. 
+
+```{r, fig.height=7, fig.width=9}
+library(cvms)
+library(ggplot2)
+library(patchwork)
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.learning), 
+  target_col = "pred.labels.learning", 
+  prediction_col = "t",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.test), 
+  target_col = "pred.labels.test", 
+  prediction_col = "tt",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+```
+
+Na powyższych macierzach odmienności widzimy że udało nam się znacząco zmniejszyć bład klasyfikacyjny. 
+
+
+### Drzewa klasyfikacyjne dla różnych podzbiorów
+
+W tym podpunkcie wykorzystamy naszą lepszą wersję drzewa, która posiada zoptymalizowane parametry.
+
+Ponownie przetestujemy ją na zmiennych o najlepszej zdolności dyskryminacyjnej tj. Mg, RI, Ba, Al. Następnie porównamy otrzymany wynik z błędami dla wszystkich danych. 
+
+```{r ,fig.height=10, fig.width=12}
+set.seed(123) 
+model <- Type ~ Mg + RI + Ba + Al
+
+# Budowa drzewa decyzyjnego z domyślnymi parametrami
+tree.change <- rpart(model, data=learning.set, control=rpart.control(cp=.02, minsplit=8, maxdepth=7))
+
+# Informacje o modelu
+##print(tree.change)
+##summary(tree.change)
+
+# Wizualizacja drzewa
+##plot(tree.change)
+##text(tree.change, cex = 0.7, use.n = TRUE)
+
+# Zaawansowana wizualizacja
+rpart.plot(tree.change)
+
+# Prognozy etykiet klas
+pred.labels.learning <- predict(tree.change, newdata = learning.set, type = "class")
+pred.labels.test <- predict(tree.change, newdata = test.set, type = "class")
+
+# Prognozy prawdopodobieństw
+pred.probs.test <- predict(tree.change, newdata = test.set, type = "prob")
+
+# Wyświetlenie wyników
+##head(pred.labels.learning)
+##head(pred.labels.test)
+##head(pred.probs.test)
+t <- learning.set$Type
+tt <- test.set$Type
+# macierz pomyłek (confusion matrix)
+conf.mat.learning <- table(pred.labels.learning, t)
+
+conf.mat.test <- table(pred.labels.test, tt)
+
+# błąd klasyfikacji (na zbiorze uczącym i testowy)
+blad <- (n.learning - sum(diag(conf.mat.learning))) / n.learning
+tblad <- (n.test - sum(diag(conf.mat.test))) / n.test
+blad <- round(blad,2)
+tblad <- round(tblad,2)
+
+```
+Powyżej widzimy drzewo dla czterech najważniejszych parametrów. 
+
+```{r, fig.height=7, fig.width=9}
+library(cvms)
+library(ggplot2)
+library(patchwork)
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.learning), 
+  target_col = "pred.labels.learning", 
+  prediction_col = "t",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.test), 
+  target_col = "pred.labels.test", 
+  prediction_col = "tt",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+```
+
+
+
+W  tym przypadku zmniejszenie liczby cech nie przyniosło dobrego skutku, przy takich samych parametrach drzewo zwiększyło swój błąd klasyfikacyjny, który wynosi : `r blad`, `r tblad` dla odpowiednio zbbioru uczącego i testowego. Przy zmianie parametrów można było zmniejszyć błąd, jednak w każdym przypadku był on większy od tego uzyskanego przy wszystkich cechach. 
+
+### Podsumowanie 
+
+Podsumowując, metoda drzew klasyfikacyjnych okazała się skuteczna po odpowiedniej optymalizacji parametrów. Redukcja liczby cech nie zawsze prowadzi do poprawy jakości modelu – może natomiast zwiększyć błąd klasyfikacyjny, jeśli usunięte zmienne zawierały cenne informacje.
+
+## Naiwny klasyfikator bayesowski
+
+### Naiwny klasyfikator bayesowski na różnych parametrach
+
+Spróbujemy stworzyć nasz model na podstawie naiwnego klasyfikatora bayesowskiego, najpierw standardową wersję, a następnie z jądrową estymacją gęstości.  
+```{r, fig.height=7, fig.width=9}
+library(e1071)
+library(klaR)
+set.seed(123)
+n <- nrow(dane)
+learn.indx <- sample(1:n, 2/3 * n)
+
+learn.set <- dane[learn.indx, ]
+test.set  <- dane[-learn.indx, ]
+n.test <- nrow(learn.set)
+tn.test <- nrow(test.set)
+model <- naiveBayes(Type ~ ., data = learn.set)
+
+prog.learn <- predict(model, learn.set)
+prog.test <- predict(model, test.set)
+
+rzecz.learn <- learn.set$Type
+rzecz.test  <- test.set$Type
+
+
+conf.mat.nb <- table(rzecz.learn, prog.learn)
+
+blad.nb <- (n.test-sum(diag(conf.mat.nb)))/n.test
+tconf.mat.nb <- table(rzecz.test, prog.test)
+
+tblad.nb <- (tn.test-sum(diag(tconf.mat.nb)))/tn.test
+
+library(cvms)
+library(ggplot2)
+library(patchwork)
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.nb), 
+  target_col = "rzecz.learn", 
+  prediction_col = "prog.learn",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(tconf.mat.nb), 
+  target_col = "rzecz.test", 
+  prediction_col = "prog.test",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór testowy") +
+  theme_minimal()
+
+p1 + p2
+```
+Jak możemy zobaczyć na powyższych macierzach, naiwny klasyfiaktor bayesowski nie poradził sobie dobrze z naszymi danymi. Błąd w zbiorze uczącym wynosi: `r blad`, oraz w zbiorze testowym: `r tblad`. 
+
+Spróbujmy teraz zastosować jądrową estymacje gęstości za pomocą funkcji NaiveBayes z pakietu klaR.
+
+```{r, fig.height=7, fig.width=9}
+library(klaR)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+set.seed(123)
+n <- nrow(dane)
+learn.indx <- sample(1:n, 2/3 * n)
+
+learn.set <- dane[learn.indx, ]
+test.set <- dane[-learn.indx, ]
+n.learn <- nrow(learn.set)  
+n.test <- nrow(test.set)
+
+model <- NaiveBayes(Type ~ ., data = learn.set, usekernel = TRUE)
+
+prog.learn <- predict(model, learn.set)$class
+prog.test <- predict(model, test.set)$class
+Var1 = learn.set$Type
+Var2 = test.set$Type
+
+conf.mat.learn <- table(Var1, prog.learn)
+conf.mat.test <- table(Var2, prog.test)
+
+blad.learn <- (n.learn - sum(diag(conf.mat.learn))) / n.learn
+blad.test <- (n.test - sum(diag(conf.mat.test))) / n.test
+
+blad <- round(blad.learn,2)
+tblad <- round(blad.test,2)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.learn), 
+  target_col = "Var1",  
+  prediction_col = "prog.learn",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) +
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.test), 
+  target_col = "Var2",
+  prediction_col = "prog.test",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p1 + p2
+
+
+```
+Jak widzimy, jądrowa estymacja gęstości poprawiła nasz błąd i wynosi teraz `r blad` dla zbioru uczącego oraz `r tblad` dla zbioru testowego. 
+
+### Naiwny klasyfikator bayesowski na różnych danych
+
+Spróbujmy teraz sprawdzić jaki wpływ na wynik będzie miało wybranie podzbioru cech o najlepszych zdolnościach dyskryminacyjnych tj. Mg, RI, Ba, Al. Następnie porównamy otrzymany wynik z błędami dla wszystkich danych. 
+
+
+Będziemy stosować model o lepszej dokładności - czyli z jądrową estymacją gęstości.
+
+```{r, fig.height=7, fig.width=9}
+podzbior2 <- c("Mg", "RI", "Ba", "Al", "Type")
+dane2 <- dane[, podzbior2]
+
+library(klaR)
+library(cvms)
+library(ggplot2)
+library(patchwork)
+
+set.seed(123)
+n <- nrow(dane)
+learn.indx <- sample(1:n, 2/3 * n)
+
+learn.set <- dane2[learn.indx, ]
+test.set <- dane2[-learn.indx, ]
+n.learn <- nrow(learn.set)  
+n.test <- nrow(test.set)
+
+model <- NaiveBayes(Type ~ ., data = learn.set, usekernel = TRUE)
+
+prog.learn <- predict(model, learn.set)$class
+prog.test <- predict(model, test.set)$class
+Var1 = learn.set$Type
+Var2 = test.set$Type
+
+conf.mat.learn <- table(Var1, prog.learn)
+conf.mat.test <- table(Var2, prog.test)
+
+blad.learn <- (n.learn - sum(diag(conf.mat.learn))) / n.learn
+blad.test <- (n.test - sum(diag(conf.mat.test))) / n.test
+
+blad <- round(blad.learn,2)
+tblad <- round(blad.test,2)
+
+p1 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.learn), 
+  target_col = "Var1",  
+  prediction_col = "prog.learn",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) +
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p2 <- plot_confusion_matrix(
+  as.data.frame(conf.mat.test), 
+  target_col = "Var2",
+  prediction_col = "prog.test",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - zbiór uczący") +
+  theme_minimal()
+
+p1 + p2
+```
+Na powyższych macierzech pomyłek widzimy, że nasz model niektóre klasy zaczął rozrózniać bardzo dobrze, natomiast niektórych nie potrafi kompletnie. Ogólnie jakość dopasowania spadła, głównie za sprawą słabej rozróżnialności klasy 1, co może sugerować, że usunęliśmy jakąś ceche dobrze dyskryminującą klasę 1. Błąd dla zbioru uczącego wynosi `r blad`, natomiast dla testowego: `r tblad`
+
+## Zaawansowane porównanie metod klasyfikacji 
+
+Dla naszych modeli będziemy stosować metodę cross-validation oraz schemat typu bootstrap.
+
+### Metoda kNN
+
+```{r , fig.height=7, fig.width=9}
+library(ipred)
+dane <- Glass
+par(mfrow = c(1,2))
+
+numeric.features <- sapply(dane, is.numeric)
+data.pca <- dane[, numeric.features]
+dane_stand <- scale(data.pca)
+
+dane_stand_df <- as.data.frame(dane_stand)
+dane_stand_df$Type <- dane$Type
+
+my.predict  <- function(model, newdata) predict(model, newdata=newdata, type="class")
+my.ipredknn <- function(formula1, data1, ile.sasiadow) ipredknn(formula=formula1,data=data1,k=ile.sasiadow)
+set.seed(123)
+
+# Sprawdzenie, czy i w jakim stopniu liczba sąsiadów wpływa na skuteczność algorytmu k-NN (metoda: 3-fold cross-validation)
+liczba.sasiadow.zakres <- 1:15
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+                   errorest(Type ~., dane_stand_df, model=my.ipredknn, predict=my.predict, estimator="cv", 
+                            est.para=control.errorest(k = 10), ile.sasiadow=k)$error)
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, 
+     main="Wpływ liczby sąsiadów na błąd klasyfikacji", xlab="k (liczba sąsiadów)", 
+     ylab="błąd klas. (10-fold CV)")
+grid()
+
+liczba.sasiadow.zakres <- 1:15
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+                   errorest(Type ~., dane_stand_df, model=my.ipredknn, predict=my.predict, estimator="boot", 
+                            est.para=control.errorest(nboot = 50), ile.sasiadow=k)$error)
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="blue", lwd=3, 
+     main="Wpływ liczby sąsiadów na błąd klasyfikacji", xlab="k (liczba sąsiadów)", 
+     ylab="błąd klas. (bootstrap)")
+grid()
+
+```
+
+Jak możemy zobaczyć, wyniki zaawansowanych metod oceny błędu dały podobne wyniki co podział na zbiór uczący i testowy. Najmniejsze błędy dała nam klasyfikacja dla 2 najbliższych sąsiadów. Wyniki błędu klasyfikacyjnego dla metody bootstrap i 10-krotnej walidacji dały podobne błędy jednak nieco wyższe niż liczone podstawowymi metodami. Pokazuje to że nawet proste metody oceny dokładności dają nam czasem dobre rezultaty. 
+
+### Metoda - Naiwny Klasyfikator Bayesowski
+```{r }
+
+my.predict.nb <- function(model, newdata) predict(model, newdata=newdata)
+my.nb <- function(formula1, data1) naiveBayes(formula1, data=data1)
+
+set.seed(123)
+error_cv_nb <- errorest(Type ~ ., data = dane, 
+                        model = my.nb, predict = my.predict.nb, 
+                        estimator = "cv", est.para = control.errorest(k = 10))$error
+
+error_boot_nb <- errorest(Type ~ ., data = dane, 
+                          model = my.nb, predict = my.predict.nb, 
+                          estimator = "boot", est.para = control.errorest(nboot = 50))$error
+
+bladfold <- round(error_cv_nb, 3)
+bladboot <- round(error_boot_nb, 3)
+
+
+```
+Błąd klasyfikacji dla naiwnego klasyfikatora bayesowskiego według metody 10-fold CV wyniósł: `r bladfold`, natomiast dla metody bootstrap: `r bladboot`. Widzimy że wyniki te są bardzo podobne do naszej podstawowej metody gdzie błąd dla zbioru testowego był trochę wyższy (ok. 0.66). 
+
+###  Metoda - drzewa klasyfikacyjne
+```{r}
+
+my.predict.tree <- function(model, newdata) predict(model, newdata=newdata, type="class")
+my.tree <- function(formula1, data1) rpart(formula1, data=data1, method="class")
+set.seed(123)
+
+error_cv_tree <- errorest(Type ~ ., data = dane,
+                          model = my.tree, predict = my.predict.tree,
+                          estimator = "cv", est.para = control.errorest(k = 10))$error
+
+error_boot_tree <- errorest(Type ~ ., data = dane,
+                            model = my.tree, predict = my.predict.tree,
+                            estimator = "boot", est.para = control.errorest(nboot = 50))$error
+
+
+bladfold <- round(error_cv_tree, 3)
+bladboot <- round(error_boot_tree, 3)
+
+
+```
+Znowu wyniki mamy bardzo podobne do tych które obliczyliśmy podstawowymi metodami. Wtedy otrzymaliśmy błąd wielkości 0.2 dla zbioru uczącego oraz 0.36 dla zbioru testowego. W tym przypadku bliżej nam do metody 10-fold CV, gdzie błąd wyniósł: `r bladfold`, ale za to metoda Bootstrap dała nam lepsze rezultaty i błąd wyniósł ok. `r bladboot`. Dla większych danych takie różnice przynoszą znaczne skutki, jednak dla nas metody podstawowe dają tutaj również zadowalające wyniki. 
+
+## Wnioski końcowe
+
+
+### Dobór zmiennych i parametrów:
+
+#### k-NN (k-najbliższych sąsiadów)
+
+Najlepsze wyniki uzyskano dla parametru k = 2, przy wykorzystaniu pełnego zestawu cech. W takim przypadku błąd klasyfikacji wyniósł 0.19 dla zbioru uczącego oraz 0.39 dla zbioru testowego. Próba ograniczenia zmiennych tylko do tych o największej mocy dyskryminacyjnej (Mg, RI, Ba, Al) nie poprawiła znacząco wyników – co więcej, dla zbioru testowego błąd pozostał na podobnym poziomie. Zwiększanie liczby sąsiadów do k = 5 i k = 7 pogarszało rezultaty, co sugeruje, że dla danych Glass mniejsze wartości k lepiej radzą sobie z lokalną strukturą klas.
+
+
+#### Naiwny klasyfikator Bayesa
+
+Najlepsze rezultaty uzyskano przy zastosowaniu **jądrowej estymacji gęstości (NaiveBayes z klaR), z wykorzystaniem pełnego zbioru cech – wtedy błąd klasyfikacji wynosił 0.20 (uczący) i 0.50 (testowy). Przy ograniczeniu do czterech cech (Mg, RI, Ba, Al), skuteczność znacząco spadła – błąd klasyfikacji wzrósł do 0.39 (uczący) i 0.65 (testowy). Wskazuje to, że model Bayesa, który zakłada niezależność cech, traci na dokładności, gdy brakuje mu informacji ukrytej w dodatkowych zmiennych. Wersja klasyczna (bez estymacji gęstości) wypadła jeszcze słabiej (błąd do 0.66).
+
+
+
+#### Drzewa klasyfikacyjne
+
+Najlepsze wyniki osiągnięto dla pełnego zestawu cech przy zastosowaniu optymalnych parametrów: `cp = 0.02`, `minsplit = 8`, `maxdepth = 7`.
+W tym ustawieniu model osiągnął błąd 0.12 na zbiorze uczącym oraz 0.33 na testowym. Próba redukcji cech do najbardziej informacyjnych (Mg, RI, Ba, Al) doprowadziła do pogorszenia wyników – błąd wzrósł do 0.16 (uczący) i 0.36 (testowy). Pokazuje to, że nawet pozornie mniej istotne cechy mogły zawierać dodatkową informację strukturalną istotną dla klasyfikacji w drzewach.
+
+
+### Porównanie metod klasyfikacyjnych:
+Spośród zastosowanych metod klasyfikacyjnych, najlepiej wypadły drzewa decyzyjne, szczególnie po dostrojeniu parametrów – były one skuteczniejsze niż metoda k-NN czy naiwny klasyfikator bayesowski. Metoda k-NN dawała przyzwoite wyniki przy niskim k, ale skuteczność szybko malała wraz ze wzrostem liczby sąsiadów. Naiwny klasyfikator bayesowski osiągał gorsze rezultaty w wersji standardowej, a dopiero zastosowanie jądrowej estymacji gęstości poprawiło jakość klasyfikacji – choć i tak pozostawała niższa niż w przypadku drzew. Największe trudności we wszystkich metodach sprawiało rozróżnienie niektórych rzadkich klas (np. typu 1 i 6), co wynikało m.in. z niezrównoważenia danych.
+
+### Wpływ schematu oceny dokładności:
+Wprowadzenie zaawansowanych metod oceny, takich jak 10-fold cross-validation i bootstrap, nie zmieniło zasadniczych wniosków dotyczących skuteczności metod. Choć uzyskane błędy były nieco niższe niż przy jednokrotnym podziale danych, chociaż nie we wszystkich przypadkach (np. dla k-NN błędy z CV były większe niż przy zwykłym podziale), ogólna kolejność skuteczności metod pozostała taka sama: drzewa > k-NN > naiwny Bayes. Pokazuje to, że prostsze schematy oceny (np. podział 2/3-1/3) były wystarczające do uzyskania wiarygodnych porównań, choć bardziej zaawansowane metody lepiej szacują uogólnialność modeli i pozwalają uzyskać niższe błędy.

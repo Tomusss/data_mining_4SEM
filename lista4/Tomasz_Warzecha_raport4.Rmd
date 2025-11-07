@@ -1,0 +1,827 @@
+---
+title: Zaawansowane metody klasyfikacji i Analiza skupień na podstawie danych iris, Glass
+author: "Tomasz Warzecha,   album 282261"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    fig_caption: true
+    fig_width: 5
+    fig_height: 4
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+header-includes:
+- \usepackage[polish]{babel}
+- \usepackage[OT4]{polski}
+- \usepackage[T1]{fontenc}
+- \usepackage[utf8]{inputenc}
+- \usepackage{graphicx}
+- \usepackage{float}
+subtitle: Eksploracja danych
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  encoding = "UTF-8",
+  comment = "",
+  warning = FALSE,
+  message = FALSE
+)
+options(encoding = "UTF-8")
+Sys.setlocale("LC_ALL", "Polish")
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(results = "asis")
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+library(mlbench)
+library(DataExplorer)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(ipred)
+library(randomForest)
+library(e1071)
+```
+
+
+# Zaawansowane metody klasyfikacji
+
+## Rodziny klasyfikatorów/uczenie zespołowe
+
+```{r }
+
+data(Glass)
+dane <- na.omit(Glass)
+
+
+## stanaryzacja danych
+numeric.features <- sapply(dane, is.numeric)
+data.pca <- dane[, numeric.features]
+dane_stand <- scale(data.pca)
+
+dane_stand_df <- as.data.frame(dane_stand)
+dane_stand_df$Type <- dane$Type
+```
+
+```{r }
+# Rozkład klas
+barplot(prop.table(table(dane$Type)), col=4:9, main="Dane Glass - rozkład klas")
+grid()
+
+# PCA (wizualizacja danych w 2D)
+dane2.pca <- prcomp(dane[, sapply(dane, is.numeric)], center=T, scale=T)
+#summary(dane2.pca)
+plot(dane2.pca$x[,1:2], col=dane$Type, main="Dane Glass - wykres na bazie PCA", pch=15, cex=0.7)
+legend("topright", col=1:9, legend=levels(dane$Type), pch=15, bg="azure2")
+
+# ocena zdolności dyskryminacyjnych poszczególnych zmiennych
+
+```
+```{r, fig.height=10, fig.width=12}
+plot_boxplot(dane, by="Type")
+```
+
+### Pojedyńcze drzewo klasyfikacyjne
+```{r , fig.height=10, fig.width=12}
+tree <- rpart(Type~., data=dane) #parametry domyślne
+rpart.plot(tree, main="Drzewo klasyfikacyjne - dane Glass", cex=.5)
+```
+
+Na powyższym Rysunku przedstawione zostało drzewo klasyfikacyjne dla całego zbioru danych. Poniżej znajdują się dane ile wynosiły błędy klasyfikacyjne dla zbioru testowego:
+
+```{r }
+set.seed(123)
+n <- nrow(Glass)
+learning.set.index <- sample(1:n, 2/3 * n)
+learning.set <- Glass[learning.set.index, ]
+test.set <- Glass[-learning.set.index, ]
+n.learning <- nrow(learning.set)
+n.test <- nrow(test.set)
+
+model <- Type ~ RI + Na + Mg + Al + Si + K + Ca + Ba + Fe
+tree.simple <- rpart(model, data = learning.set)
+
+pred.labels.learning <- predict(tree.simple, newdata = learning.set, type = "class")
+pred.labels.test <- predict(tree.simple, newdata = test.set, type = "class")
+conf.mat.learning <- table(pred.labels.learning, learning.set$Type)
+conf.mat.test <- table(pred.labels.test, test.set$Type)
+
+error.rate.learning <- (n.learning - sum(diag(conf.mat.learning))) / n.learning
+error.rate.test <- (n.test - sum(diag(conf.mat.test))) / n.test
+cat("Błąd klasyfikacji - zbiór uczący:", round(error.rate.learning, 3), "\n")
+cat("Błąd klasyfikacji - zbiór testowy:", round(error.rate.test, 3), "\n")
+```
+
+### Metoda bagging
+
+```{r }
+btree <- bagging(Type~., data=dane, nbagg=25, minsplit=1, cp=0)
+B.vector <- c(1, 5, 10, 20, 30, 40, 50, 100)
+bagging.error.rates <- sapply(B.vector, function(b)  {errorest(Type~., data=dane, model=bagging, nbagg=b, estimator="632plus", est.para=control.errorest(nboot = 20))$error})
+plot(B.vector, bagging.error.rates, xlab="B", main="Bagging: error rate vs. B", type="b", col="#A2007B")
+grid()
+```
+Można zauważyć na Rysunku, że wraz ze wzrostem liczby drzew (parametru B) błąd klasyfikacji początkowo gwałtownie maleje – już przy 5–10 drzewach osiąga znaczną poprawę. Najniższy poziom błędu przypada na około 40 drzew. Dalsze zwiększanie liczby drzew nie przynosi wyraźnej poprawy, a wręcz może prowadzić do lekkiego pogorszenia wyników, jak w przypadku B=100. Wskazuje to, że optymalna liczba drzew mieści się w przedziale około 30–50
+
+### Metoda Random Forest
+
+```{r }
+p <-  ncol(dane) - 1
+
+# różne parametry  (ntree - liczba drzew, mtry - liczba wybieranych losowo cech)
+rf.1 <- randomForest(Type~., data=dane, ntree=1, mtry=p, importance=TRUE)
+rf.2 <- randomForest(Type~., data=dane, ntree=100, mtry=sqrt(p), importance=TRUE)
+pred.labels <- predict(rf.2, newdata=dane, type="class")
+real.labels <- dane$Type
+#(confusion.matrix <- table(pred.labels, real.labels)) # dla zbioru uczącego
+pred.probs <- predict(rf.2, newdata=dane, type="prob")
+# macierz pomyłek (confusion matrix)  na bazie OOB (Out-Of-Bag), tzn. obserwacji, 
+# które nie były wybierane w danej replikacji
+#rf.2$confusion
+# Wykres błędu klasyfikacji
+plot(rf.2)
+legend("topright", 
+       legend = c("Błąd OOB", levels(dane$Type)), 
+       col = 1:(length(levels(dane$Type)) + 1), 
+       lty = 1, 
+       cex = 0.8)
+```
+
+Wykres błędu dla metody Random Forest wskazuje, że model osiąga stabilność przy około 40 drzewach — dalsze zwiększanie ich liczby nie prowadzi już do istotnej poprawy wyników. Model lepiej radzi sobie z klasyfikacją przypadków niechorobowych, natomiast wykrywanie przypadków choroby wypada gorzej. Taka asymetria może być skutkiem nierównomiernego rozkładu klas w zbiorze treningowym. Warto rozważyć zastosowanie technik wyrównywania klas, takich jak oversampling czy undersampling, lub alternatywnych miar oceny skuteczności modelu, które lepiej uwzględniają niezrównoważone dane. Szczególnie trudna okazuje się klasyfikacja klasy 5, dla której błąd nie spada poniżej 50%.
+
+```{r}
+# Ranking ważności cech
+varImpPlot(rf.2, 
+           main = "Istotność zmiennych", 
+           cex.main = 0.7)
+```
+Na wykresie przedstawiono istotność zmiennych w modelu Random Forest. Można zauważyć, które cechy mają największy wpływ na przyporządkowanie obserwacji do odpowiednich klas. W przypadku miary spadku dokładności (MeanDecreaseAccuracy) kluczową rolę odgrywa zmienna Mg, a nieco mniejsze znaczenie ma zmienna RI. Z kolei według miary spadku nieczystości Gini (MeanDecreaseGini), największy wkład w budowę modelu mają zmienne Al oraz Mg, które wykazują podobny poziom istotności.
+
+### Wnioski
+W przypadku zastosowania pojedynczego drzewa klasyfikacyjnego błąd klasyfikacji na zbiorze testowym wyniósł około 36%, co wskazuje na stosunkowo niską skuteczność tego podejścia dla danych typu Glass.
+
+Zastosowanie metody baggingu znacząco poprawiło jakość klasyfikacji – już przy około 5–10 drzewach odnotowano zauważalny spadek błędu, który osiągnął minimum w okolicach 40 drzew. Dalsze zwiększanie liczby replikacji nie przynosiło już wyraźnych korzyści, a w niektórych przypadkach powodowało nawet lekkie pogorszenie wyników. Optymalna liczba drzew mieściła się w przedziale 30–50.
+
+Metoda Random Forest również pozwoliła na poprawę jakości klasyfikacji. Wykres błędu OOB wskazał, że model stabilizuje się przy około 40 drzewach. Jednakże, analiza macierzy błędów pokazała wyraźną asymetrię skuteczności modelu — klasy były rozpoznawane z różną dokładnością. Szczególnie trudna okazała się klasyfikacja klasy 5, dla której błąd nie spadał poniżej 50%. Może to wynikać z nierównomiernego rozkładu klas w zbiorze treningowym.
+
+Podsumowując, najlepsze rezultaty uzyskano za pomocą metody bagging, która pozwoliła na największą redukcję błędu klasyfikacyjnego względem pojedynczego drzewa. Choć Random Forest również poprawił skuteczność klasyfikacji, to jego działanie było mniej efektywne przy obecnym rozkładzie danych.
+
+## Metoda wektorów nośnych (SVM)
+
+Metodę wektorów nośnych zastosowano dla dwóch zmiennych o najlepszych zdolności dyskryminacyjnych - Mg oraz Al, aby dobrze zwizualizować je na wykresach.
+
+### Porównanie skuteczności funkcji jądrowych i parametru kosztów
+```{r }
+set.seed(123)
+data(Glass)
+dane <- na.omit(Glass)
+## stanaryzacja danych
+numeric.features <- sapply(dane, is.numeric)
+data.pca <- dane[, numeric.features]
+dane_stand <- scale(data.pca)
+dane_stand_df <- as.data.frame(dane_stand)
+dane_stand_df$Type <- dane$Type
+
+n <- nrow(dane)
+learn.ind    <- sample(1:n, 2/3*n)
+training.set <- dane_stand_df[learn.ind, ]
+test.set     <- dane_stand_df[-learn.ind, ]
+```
+
+```{r jadro_liniowe1}
+
+par(mfrow = c(1, 2))
+## c=0.1
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="linear", cost=0.1)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+```
+
+```{r }
+
+## c=1
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="linear", cost=1)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+```
+
+```{r }
+
+## c=10
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="linear", cost=10)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+
+```
+
+Na wykresach powyżej przedstawiono funkcje decyzyjne metody SVM wyznaczone na podstawie dwóch zmiennych: Mg oraz Al. Analiza skuteczności klasyfikacji dla różnych wartości parametru regularyzacji C pokazuje, że lepsze wyniki osiągnięto przy wyższych wartościach tego parametru. Zarówno dla C=1, jak i C=10 skuteczność klasyfikacji wyniosła 51,4%, natomiast dla niższego C=0,1 była nieco niższa i wyniosła 48,6%. Choć różnice nie są duże, wskazuje to, że zwiększenie wartości C poprawia zdolność modelu do dopasowania się do danych, kosztem mniejszego marginesu.
+
+```{r }
+
+## c=0.1
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="radial",cost =0.1)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+
+```
+
+```{r }
+
+## c=1
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="radial", cost=1)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+
+```
+
+```{r }
+
+## c=10
+
+svm.linear.c0.1 <- svm(Type ~ Mg + Al, data=training.set, kernel="radial", cost=10)
+##summary(svm.linear.C0.1)
+plot(svm.linear.c0.1, data=training.set, Mg~Al, svSymbol=16, grid=100)
+
+real.labels <- test.set$Type
+n.test <- length(real.labels)
+pred.svm.lin.c0.1 <- predict(svm.linear.c0.1, newdata=test.set)
+acc.svm.lin.c0.1 <- sum(diag(table(pred.svm.lin.c0.1, real.labels))) / n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.lin.c0.1 , 3), "\n")
+
+```
+
+Na wykresach powyżej przedstawiono funkcje decyzyjne SVM dla zmiennych Mg oraz Al, wykorzystując jądro radialne oraz różne wartości parametru kosztu C. Najlepszą skuteczność uzyskano dla parametru C równego 10, wynoszącą 54,2%. Niższe wyniki odnotowano dla C = 1 (52,8%) oraz najniższy dla C = 0,1 (51,4%).
+
+Skuteczność klasyfikacji zależy zarówno od doboru funkcji jądrowej, jak i wartości parametru kosztu C. Choć różnice w wynikach nie są znaczne, odpowiednia konfiguracja parametru C może prowadzić do zbliżonych rezultatów. Mimo to, przy identycznych ustawieniach, lepsze efekty uzyskano przy zastosowaniu jądra radialnego.
+
+### Dobranie najlepszych parametrów dla jądra radialnego
+
+Poniższe wykresy przedstawiają dokładność klasyfikacji w zależności od parametru gamma oraz cost (parametr oznaczony jako C).
+
+```{r }
+C.range <- 2^((-4):4)
+set.seed(123)
+gamma.range <- 2^((-8):4)
+radial.tune <- tune(svm, train.x=training.set[,c("Mg", "Al")],
+                    train.y=training.set[,"Type"],
+                    kernel="radial",
+                    ranges=list(cost=C.range, gamma=gamma.range))
+
+#print(radial.tune)
+plot(radial.tune, transform.x=log, transform.y=log, color.palette = topo.colors)
+plot(radial.tune, type="perspective")
+
+
+
+C.best <- radial.tune$best.parameters[["cost"]]
+gamma.best <- radial.tune$best.parameters[["gamma"]]
+
+svm.radial.tuned <- svm(Type~Mg+Al,
+                        data=training.set, kernel="radial",
+                        cost=C.best, gamma=gamma.best)
+##summary(svm.radial.tuned)
+
+
+pred.svm.radial.tuned <- predict(svm.radial.tuned, newdata=test.set)
+acc.svm.radial <- sum(diag(table(pred.svm.radial.tuned, real.labels)))/n.test
+cat("Skuteczność klasyfikacji:", round(acc.svm.radial, 3), "\n")
+
+```
+
+Najlepszymi parametrami, uzyskanymi dzięki odpowiedniej optymalizacji, okazały się koszt C = 2 oraz gamma = 4. Skuteczność klasyfikacji przy tych ustawieniach wyniosła 55,6%. Jest to najlepszy wynik osiągnięty przy zastosowaniu funkcji jądrowych (jądro radialne) w metodzie wektorów nośnych. Można zatem stwierdzić, że właściwa optymalizacja pozwoliła poprawić skuteczność klasyfikacji.
+
+## Wnioski końcowe
+
+W metodzie wektorów nośnych, mimo wykorzystania jedynie dwóch zmiennych, uzyskano lepsze wyniki niż w przypadku drzew decyzyjnych oraz metod uczenia zespołowego.
+
+Dla SVM z jądrem radialnym najlepszy rezultat osiągnięto po optymalizacji parametrów gamma i kosztu C — skuteczność wyniosła wtedy 55,6%. Natomiast w przypadku jądra liniowego, wyniki były niższe nawet od domyślnych ustawień jądra radialnego. Maksymalna skuteczność dla jądra liniowego wyniosła 51,4%, podczas gdy przy domyślnym parametrze gamma i zmiennym C w jądrze radialnym osiągnięto 54,8%.
+
+Wśród metod uczenia zespołowego i drzew decyzyjnych, najlepsze rezultaty uzyskano stosując bagging, który pozwolił na zmniejszenie błędu klasyfikacji do około 20%. Metoda ta okazała się nieznacznie lepsza od lasów losowych (random forest).
+
+Metoda SVM z odpowiednio dobranym jądrem i parametrami przewyższyła pozostałe podejścia pod względem skuteczności. W przypadku metod zespołowych, bagging uzyskał najniższy błąd, choć różnice były niewielkie.
+
+# Analiza skupień – algorytmy grupujące i hierarchiczne
+
+## Wybór i przygotowanie danych
+W tym zadaniu pracujemy na danych Glass (R-pakiet mlbench). Zbiór danych Glass charakteryzuje się złożoną strukturą klas oraz wyraźnymi różnicami w rozkładach cech chemicznych. W przeciwieństwie do prostych zbiorów jak iris, tutaj efekt maskowania klas jest silniejszy, a nierównowaga klas wymaga specjalnego podejścia.
+
+```{r}
+library(mlbench)
+dane <- data("Glass", package = "mlbench")
+library(mlbench)
+dane <- Glass
+#dane
+# Sprawdzenie struktury danych
+#str(Glass)
+#colSums(is.na(dane))  # Brak brakujących wartości w oryginalnym zbiorze
+#dim(dane)
+```
+
+Zbiór danych Glass zawiera 214 przypadków opisujących różne rodzaje szkła na podstawie ich składu chemicznego. Każdy przypadek charakteryzuje się 9 cechami numerycznymi, w tym zawartością pierwiastków takich jak sód (Na), magnez (Mg), glin (Al), krzem (Si), potas (K), wapń (Ca), bar (Ba), żelazo (Fe) oraz współczynnikiem załamania światła (RI). Klasyfikacja odbywa się na podstawie zmiennej Type, która określa typ szkła i przyjmuje 6 różnych wartości (od 1 do 6).
+
+Nasze dane nie posiadają żadnych braków danych, brak występowania danego pierwiastka w danym rodzaju szkła oznaczany jest jako 0.0 zatem nie przeszkadza nam to w dalszej analizie. 
+
+Wszystkie typy zmiennych są numeryczne, z wyjątkiem zmiennej Type zawierającej etykietki naszych klas, która jest zmienną typu factor
+
+Aby ułatwić wizualizację wyników, wybierzemy losowo (seed(123)) zbiór zawierający 200 rekordów (wierszy) oraz usuwamy zmienną grupującą zawierającą etykietki klas (grup).
+```{r}
+set.seed(123)
+n <- dim(dane)[1]
+dane.indx <- sample(1:n,200)
+dane  <- dane[dane.indx,]
+dane_analiza = dane[,-10]
+```
+```{r}
+
+par(las=3, mar=c(8,4,4,2)+0.1)
+boxplot(dane_analiza, col=rainbow(9), main="Rozkład cech przed standaryzacją")
+par(las=1, mar=c(5,4,4,2)+0.1)
+```
+Wykres pokazuje wyraźne różnice w skalach i rozproszeniu poszczególnych cech. W zbiorze danych Glass cechy reprezentują różne pierwiastki chemiczne (np. Na, Mg, Al) oraz współczynnik załamania światła (RI). Wartości tych cech mają różne zakresy. Jak widzimy na wykresie powyżej, pierwiastki mają różne zakresy, szczegółnie zawartość krzemu jest zdecydownie wyższa niż innych pierwiastków. Może to znacząco wpłynąć na odległości, które zostaną zdominowane przez właśnie ten pierwiastek. Standaryzacja w tym przypadku jest zalecana tak aby obliczenia odległości nie zostały zdominowane przez cechy o większych wartościach, zaburzyłoby wyniki grupowania.
+
+```{r}
+
+dane_stand <- scale(dane_analiza)
+par(las=3, mar=c(8,4,4,2)+0.1)
+boxplot(dane_stand, col=rainbow(9), main="Rozkład cech po standaryzacji")
+par(las=1, mar=c(5,4,4,2)+0.1)
+```
+Na wykresie powyżej znajdują się rozkłady cech po standaryzacji. Jak widzimy, teraz wartości znajdują się w podobnym zakresie, dzięki czemu nie wpłyną fałszywie na ocene odległości podczas analizy skupień, którą zaraz wykonamy. 
+## Wizualizacja wyników algortymów
+
+### Zastosowanie algorytmów grupujących i hierarchicznych
+
+W naszej analizie wezmiemy pod uwagę algorytm PAM (grupujący) oraz AGNES (hierarchiczny).
+
+Na początku wyznaczymy macież niepodobieństw dla naszych danych.
+```{r}
+library(factoextra)
+library(cluster)
+# Dane Glass zawierają tylko cechy numeryczne (skład chemiczny)
+Glass.wybrane <- dane_stand
+
+# Wyznaczenie macierzy niepodobieństwa (używamy odległości euklidesowej)
+Glass.MacNiepodob <- daisy(Glass.wybrane, metric = "euclidean")
+
+# Konwersja do macierzy
+Glass.MacNiepodob.matrix <- as.matrix(Glass.MacNiepodob)
+
+# Wizualizacja macierzy odmienności
+
+
+# Po uporządkowaniu
+fviz_dist(Glass.MacNiepodob, order = TRUE)
+
+
+```
+Na powyższym rysunku możemy zobaczyć macierz niepodobieństw dla naszych danych. Zastosujemy teraz algorytm PAM i zwizualizujemy jego wyniki. Przyjmujemy liczbę skupień K równą rzeczywistej liczbie klas, czyli w naszym przypadku 6. 
+```{r}
+Glass.pam2 <- pam(x = Glass.MacNiepodob, diss = TRUE, k = 6)
+
+plot(Glass.pam2, main = "Wyniki metody PAM dla danych Glass (K=6)")
+
+
+```
+Na powyższym wykresie widzimy wyniki algorymu PAM dla naszych danych. Widzimy podział na 6 skupisk, gdzie szerokość wynosi 0.34. Możemy zauważyć że największa ilość przypadków trafiła do klasy 1, natomiast najmniej do klasy 6, co może być zgodne z intuicją.
+ 
+Spróbujmy teraz zastosować algorytm AGNES i zwizualizować jego wyniki. Przyjmujemy liczbę skupień K równą rzeczywistej liczbie klas, czyli w naszym przypadku 6. 
+
+```{r ,fig.height=10, fig.width=12}
+
+library(patchwork)
+
+Glass.agnes.avg <- agnes(x = Glass.MacNiepodob, diss = TRUE, method = "average")
+Glass.agnes.single <- agnes(x = Glass.MacNiepodob, diss = TRUE, method = "single")
+Glass.agnes.complete <- agnes(x = Glass.MacNiepodob, diss = TRUE, method = "complete")
+
+dend_avg <- fviz_dend(Glass.agnes.avg, k = 6, cex = 0.5, main = "AGNES: average linkage (Glass)")
+dend_single <- fviz_dend(Glass.agnes.single, k = 6, cex = 0.5, main = "AGNES: single linkage (Glass)")
+dend_complete <- fviz_dend(Glass.agnes.complete, k = 6, cex = 0.5, main = "AGNES: complete linkage (Glass)")
+
+dend_avg + dend_single + dend_complete
+
+agnes_results <- list(
+  average = Glass.agnes.avg,
+  single = Glass.agnes.single,
+  complete = Glass.agnes.complete
+)
+
+coeff <- sapply(agnes_results, function(x) x$ac)
+najw = coeff[3]
+```
+Na powyższych wykresach widzimy nasze drzewa z podziałem na 6 skupisk. Widzimy, że najlepiej poradziła sobie metoda complete, co potwierdza analiza współczynnika aglomeracji, ktory wynosi dla niej: `r najw`. 
+
+W dalszej analizie będziemy brali pod uwagę właśnie metodę complete. Narysujmy sobie jeszcze wykres wskaźnika silhouette dla k=6.
+
+```{r}
+Glass.agnes.k6 <- cutree(Glass.agnes.complete, k = 6)
+
+sil_glass <- silhouette(Glass.agnes.k6, dist = Glass.MacNiepodob)
+
+# Tylko wykres — bez printowania pod spodem zbędnej tabeli:
+plot_sil <- fviz_silhouette(sil_glass,print.summary = "False")
+
+# Render wykresu
+print(plot_sil+ ggtitle("Wykres silhouette dla metody complete linkage (K=6)"))
+```
+```{r}
+fviz_dend(Glass.agnes.avg, k = 6, 
+          cex = 0.5, 
+          k_colors = "jco",
+          rect = TRUE,
+          main = "Dendrogram Glass (average linkage, K=6)")
+
+
+```
+
+
+### Wizualizacja danych na bazie PCA
+
+Zwizualizujmy teraz nasze dane na wykresie 2D. Wykorzystamy do tego metodę PCA.
+
+Na początku weźmiemy pod uwagę wyniki algorytmu grupującego - PAM.
+
+
+```{r}
+etykietki.pam2 <- Glass.pam2$clustering
+
+Glass.PCA <- prcomp(dane_stand, scale. = FALSE) 
+
+fviz_eig(Glass.PCA, addlabels = TRUE, 
+         main = "Wyjaśniona wariancja przez składowe główne")
+
+```
+Na powyższym wykresie możemy zobaczyć wariancję kolejnych składowych. Z dwóch pierwszych otrzymujemy jedynie ok. 52% pełnej informacji, natomiast dla czytelności wykresu, do zobrazowania użyjemy jedynie dwóch pierwszych składowych. 
+```{r ,fig.height=7, fig.width=9}
+fviz_pca_ind(Glass.PCA,
+             col.ind = as.factor(etykietki.pam2), # kolory = skupienia
+             geom.ind = "point",
+             pointsize = 3,
+             pointshape = 21,
+             fill.ind = as.factor(dane$Type), # wypełnienie = rzeczywiste klasy
+             palette = "jco",
+             legend.title = list(fill = "Rzeczywiste klasy", 
+                                color = "Skupienia PAM"),
+             title = "Wyniki PAM na PCA (Glass)") +
+  theme_minimal()
+
+
+```
+Na powyższym wykresie możemy zobaczyć Przynależność do skupisk i rzeczywistych typów naszego szkła. Nasz algorytm nie poradził sobie za dobrze z przyporządkowaniem skkupień do rzeczywistych klas. Widzimy obszary w których punkty z różnych skupisk się mieszają. Spróbujmy jeszcze zwizualizować nasze dane poprzez biblot:
+```{r,fig.height=7, fig.width=9}
+fviz_pca_biplot(Glass.PCA, 
+                col.ind = as.factor(etykietki.pam2),
+                geom.ind = "point",
+                palette = "jco",
+                addEllipses = TRUE,
+                ellipse.type = "convex",
+                col.var = "black",
+                legend.title = "Skupienia PAM",
+                title = "Biplot: Skupienia i cechy chemiczne") +
+  theme_minimal()
+```
+Tutaj dokładnie widzimy jak wyglądają nasze skupienia punktów. Niektóre niestety nachodzą na siebie, natomias biorąc pod uwagę dużą ilość klas, nasz wykres nie wygląda najgorzej. Możemy jeszcze spojrzeć na centra klas, jednak w naszym przypadku nie wniosą one za dużo do naszej analizy.
+
+Popatrzmy teraz na własności naszych skupień:
+
+```{r,fig.height=7, fig.width=9}
+library(fpc)
+cluster_stats <- cluster.stats(Glass.MacNiepodob, etykietki.pam2)
+srednia <- cluster_stats$average.within
+# Wizualizacja rozkładu odległości wewnątrz skupień
+boxplot(split(Glass.MacNiepodob[lower.tri(Glass.MacNiepodob)], 
+        etykietki.pam2[lower.tri(etykietki.pam2)]),
+        main = "Rozkład odległości wewnątrz skupień",
+        xlab = "Skupienie", ylab = "Odległość")
+```
+Na powyższym wykresie możemy zobaczyć rozkłady odległości wewnątrz każdego z naszych skupień. Widzimy że zarówno wariancje jak i średnie są do siebie zbliżone. Świadczy to o podobnym poziomie „zwartości” wewnątrz skupień. Odstające obserwacje mogą sugerować, że część punktów jest słabo dopasowana do przypisanego skupienia.
+
+Średnia odległość wewnątrz skupień wynosi: `r srednia` co wskazuje na umiarkowaną zwartość grup.
+
+Średnia odległość między skupieniami wynosi `r cluster_stats$average.between` co wskazuje na ogólną umiarkowaną separację, natomiast wskaźnik separacji wynosi: `r cluster_stats$separation`.
+
+Poszczególne pary skupień wykazują jednak zróżnicowaną separację:
+Ponad połowa par ma słabą lub umiarkowaną separację (wartości 0.57-1.34)
+Jedna para skupień jest wyraźnie oddzielona (wartość 8.45)
+
+Wyznaczmy teraz macierz pomyłek, tak aby zobaczyć separowalność poszczególnych klas.
+
+```{r}
+library(cvms)
+library(ggplot2)
+library(patchwork)
+# (CentraSkupisk.nazwy <- Glass.pam2$medoids)
+#Glass[CentraSkupisk.nazwy,]
+library(caret)
+etykiety_skupien <- factor(etykietki.pam2)
+etykiety_klas <- factor(dane$Type)
+
+
+wspolne_poziomy <- union(levels(etykiety_skupien), levels(etykiety_klas))
+levels(etykiety_skupien) <- wspolne_poziomy
+levels(etykiety_klas) <- wspolne_poziomy
+
+conf_matrix <- table(Predicted = etykiety_skupien, Actual = etykiety_klas)
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+plot_confusion_matrix(
+  as.data.frame(conf_matrix), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Greens"
+) + 
+  ggtitle("Macierz pomyłek - PAM") +
+  theme_minimal()
+
+```
+Widzimy że nasz algorytm PAM poradził sobie słabo z rozpoznawaniem typów, zgodność tutaj wynosiła zaledwie `r accuracy`.
+
+
+Przeanalizujmy teraz wyniki algorytmu hierarchicznego - AGNES. Wariancja w naszym przypadku pozostaje bez zmian, używamy tego samego PCA co w poprzeniej wizualizacji.  
+
+```{r,fig.height=7, fig.width=9}
+fviz_pca_ind(Glass.PCA,
+             col.ind = as.factor(Glass.agnes.k6), # kolory = skupienia AGNES
+             geom.ind = "point",
+             pointsize = 3,
+             pointshape = 21,
+             fill.ind = as.factor(dane$Type), # wypełnienie = rzeczywiste klasy
+             palette = "jco",
+             legend.title = list(fill = "Rzeczywiste klasy", 
+                                color = "Skupienia AGNES"),
+             title = "Wyniki AGNES na PCA (Glass)") +
+  theme_minimal()
+```
+Na powyższym wykresie możemy zobaczyć Przynależność do skupisk i rzeczywistych typów naszego szkła. Agnes również nie poradził sobie za dobrze z przyporządkowaniem skkupień do rzeczywistych klas. Widzimy obszary w których punkty z różnych skupisk się mieszają. Spróbujmy jeszcze zwizualizować nasze dane poprzez biblot:
+
+```{r,fig.height=7, fig.width=9}
+fviz_pca_biplot(Glass.PCA, 
+                col.ind = as.factor(Glass.agnes.k6),
+                geom.ind = "point",
+                palette = "jco",
+                addEllipses = TRUE,
+                ellipse.type = "convex",
+                col.var = "black",
+                legend.title = "Skupienia AGNES",
+                title = "Biplot: Skupienia i cechy chemiczne (AGNES)") +
+  theme_minimal()
+```
+Biplot również wskazuje na słabe rozdzielenie i nakładanie się kolejnych skupień. 
+
+```{r,fig.height=7, fig.width=9}
+cluster_stats_agnes <- cluster.stats(Glass.MacNiepodob, Glass.agnes.k6)
+srednia_agnes <- cluster_stats_agnes$average.within
+
+boxplot(split(Glass.MacNiepodob[lower.tri(Glass.MacNiepodob)], 
+              Glass.agnes.k6[lower.tri(Glass.agnes.k6)]),
+        main = "Rozkład odległości wewnątrz skupień (AGNES)",
+        xlab = "Skupienie", ylab = "Odległość")
+
+```
+Na powyższym wykresie możemy zobaczyć rozkłady odległości wewnątrz każdego z naszych skupień. Widzimy że tutaj również wariancje jak i średnie są do siebie zbliżone.
+
+Średnia odległość wewnątrz skupień wynosi: `r srednia_agnes` co wskazuje na umiarkowaną zwartość grup.
+
+Średnia odległość między skupieniami wynosi `r cluster_stats$average.between` co wskazuje na ogólną umiarkowaną separację, natomiast wskaźnik separacji wynosi: `r cluster_stats$separation`.
+
+Wyznaczmy teraz macierz pomyłek, tak aby zobaczyć separowalność poszczególnych klas.
+```{r}
+etykiety_skupien_agnes <- factor(Glass.agnes.k6)
+etykiety_klas <- factor(dane$Type)
+
+wspolne_poziomy <- union(levels(etykiety_skupien_agnes), levels(etykiety_klas))
+levels(etykiety_skupien_agnes) <- wspolne_poziomy
+levels(etykiety_klas) <- wspolne_poziomy
+
+conf_matrix_agnes <- table(Predicted = etykiety_skupien_agnes, Actual = etykiety_klas)
+accuracy_agnes <- sum(diag(conf_matrix_agnes)) / sum(conf_matrix_agnes
+)
+plot_confusion_matrix(
+  as.data.frame(conf_matrix_agnes), 
+  target_col = "Actual", 
+  prediction_col = "Predicted",
+  counts_col = "Freq",
+  add_normalized = FALSE,
+  palette = "Blues"
+) + 
+  ggtitle("Macierz pomyłek - AGNES") +
+  theme_minimal()
+
+```
+Widzimy że nasz algorytm AGNES lepiej sobie poradził z rozpoznawaniem typów, poniważ zgodność tutaj wynosiła  `r accuracy_agnes`. Jednak nie jest to w dalszym ciągu dobry wynik. 
+
+##  Ocena jakości grupowania. Wybór optymalnej liczby skupień i porównanie metod.
+
+### Wskaźniki wewnętrzne
+
+Do oceny wskaźników wewnętrznych wykorzystamy średnią wartość indeksu silhouette, dunn oraz conectivity do porównania wyników otrzymanych dla różnych algorytmów analizy skupień (PAM i AGNES) oraz różnej liczby skupień K.
+
+```{r}
+library(clValid)
+library(cluster)
+
+internal.validation <- clValid(
+  obj = dane_stand,
+  nClust = 2:8,
+  clMethods = c("hierarchical", "pam"),
+  validation = "internal",
+      metric = "euclidean",
+
+  
+)
+
+#summary(internal.validation)
+
+```
+```{r,fig.height=5, fig.width=12}
+library(ggplot2)
+library(reshape2)
+
+measures <- slot(internal.validation, "measures")
+
+metrics_array <- as.data.frame.table(measures)
+colnames(metrics_array) <- c("Metric", "K", "Method", "Value")
+
+metrics_array$K <- as.numeric(as.character(metrics_array$K))
+
+ggplot(metrics_array, aes(x = K, y = Value, color = Method, group = Method)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2.5) +
+  facet_wrap(~ Metric, scales = "free_y") +
+  labs(title = "Porównanie metod klasteryzacji wg metryk wewnętrznych",
+       x = "Liczba skupień (K)",
+       y = "Wartość metryki",
+       color = "Metoda") +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold", size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "bottom")
+
+```
+Analiza wskaźników wewnętrznych dla metod hierarchicznej (AGNES) i PAM wykazuje wyraźne różnice w jakości grupowania. Dla metody hierarchicznej obserwujemy lepsze wyniki - niską wartość Connectivity (3.86 dla K=2), wysokie Silhouette (0.67 dla K=2) i przyzwoity indeks Dunna (0.60 dla K=2), co wskazuje na dobre zwartość i separację skupień. Jakość stopniowo spada wraz ze wzrostem liczby skupień. Metoda PAM wypadła gorzej - wysokie Connectivity (12.9 dla K=2) i niskie wartości Dunna (<0.1) sugerują problemy z separacją grup. Dla obu metod optymalne wydaje się K=2, gdzie hierarchiczna osiąga najlepsze wyniki we wszystkich metrykach. Wniosek: metoda hierarchiczna z K=2 to najlepszy wybór dla tych danych.
+
+### Wskaźniki zewnętrzne
+
+```{r}
+library(cluster)
+library(e1071)
+
+true_labels <- dane$Type 
+K_range <- 2:8
+
+check_agreement <- function(K) {
+  pam_clust <- pam(dane_stand, k = K)$cluster
+  pam_agree <- mean(pam_clust == true_labels) 
+  
+  agnes_clust <- cutree(agnes(dane_stand, method = "complete"), k = K)
+  agnes_agree <- mean(agnes_clust == true_labels)
+  
+  return(c(K = K, PAM = pam_agree, AGNES = agnes_agree))
+}
+
+results <- t(sapply(K_range, check_agreement))
+
+plot(K_range, results[, "PAM"], type = "b", col = "blue", 
+     ylim = c(0, 1), xlab = "Liczba skupień (K)", ylab = "Zgodność",
+     main = "Porównanie PAM i AGNES")
+lines(K_range, results[, "AGNES"], type = "b", col = "red")
+legend("topright", legend = c("PAM", "AGNES"), col = c("blue", "red"), lty = 1)
+
+
+```
+Analiza wyników pokazuje, że zarówno metoda PAM, jak i AGNES osiągają najwyższą zgodność z rzeczywistymi klasami (ok. 32%) dla K=2, przy czym wyniki PAM są nieco lepsze w tym przypadku. Dla większych wartości K obserwujemy stopniowy spadek zgodności, przy czym AGNES konsekwentnie uzyskuje lepsze wyniki niż PAM - dla K=3 PAM osiąga 26% vs 28,5% AGNES, a dla K=8 różnica wynosi 20.5% vs 22%. Wartości dla PAM K>4 utrzymują się na stabilnym, ale niskim poziomie , co sugeruje, że podział na więcej niż 2-3 skupienia pogarsza zgodność z rzeczywistą strukturą klas w danych. Optymalnym wyborem jest zatem K=2 dla obu metod.
+
+## Interpretacja wyników grupowania - charakterystyki skupień
+Wyznaczamy podział na skupienia dla optymalnej liczby skupień K, czyli w naszym przypadku 2. 
+Popatrzmy najpierw na wykresy pudełkowe dwóch wybranych cech:
+```{r,fig.height=10, fig.width=12}
+
+library(cluster)
+library(factoextra)
+library(ggplot2)
+
+k_optimal <- 2
+
+pam_result <- pam(dane_stand, k = k_optimal)
+pam_clusters <- pam_result$clustering
+
+agnes_result <- agnes(dane_stand, method = "complete")
+agnes_clusters <- cutree(agnes_result, k = k_optimal)
+cluster_stats <- function(data, clusters) {
+  aggregate(data, by = list(Cluster = clusters), FUN = function(x) round(mean(x), 2))
+}
+
+
+```
+
+```{r, fig.height=7, fig.width=9}
+library(patchwork)
+
+dane_with_clusters <- cbind(dane, PAM_Cluster = pam_clusters, AGNES_Cluster = agnes_clusters)
+
+plot_ri <- ggplot(dane_with_clusters, aes(x = factor(PAM_Cluster), y = RI, fill = factor(PAM_Cluster))) +
+  geom_boxplot() +
+  labs(title = "Rozkład RI wg skupień PAM",
+       x = "Skupienie", y = "RI") +
+  theme_minimal()
+
+plot_na <- ggplot(dane_with_clusters, aes(x = factor(PAM_Cluster), y = Na, fill = factor(PAM_Cluster))) +
+  geom_boxplot() +
+  labs(title = "Rozkład sodu (Na) wg skupień PAM",
+       x = "Skupienie", y = "Na") +
+  theme_minimal()
+plot_ri + plot_na
+```
+Przedstawione boxploty pokazują, że klasteryzacja PAM skutecznie rozdzieliła dane na dwa skupienia w oparciu o zmienne RI i Na; skupienie 1 ma nieco wyższe RI i znacznie niższe Na, podczas gdy skupienie 2 charakteryzuje się niższym RI i wyraźnie wyższym Na, co sugeruje, że zawartość sodu jest kluczowym czynnikiem różnicującym te grupy.
+
+Popatrzmy teraz na dane medioidów:
+```{r}
+library(knitr)
+
+cechy <- names(dane)[names(dane) != "Type"]
+
+medoids <- dane[rownames(dane) %in% rownames(pam_result$medoids), cechy, drop = FALSE]
+
+medoid_stats <- rbind(
+  "Medoid 1" = as.numeric(medoids[1, cechy]),
+  "Średnia 1" = colMeans(dane[pam_clusters == 1, cechy]),
+  "Medoid 2" = as.numeric(medoids[2, cechy]),
+  "Średnia 2" = colMeans(dane[pam_clusters == 2, cechy])
+)
+
+medoid_stats_rounded <- round(medoid_stats, 2)
+
+kable(medoid_stats_rounded, 
+      caption = "Porownanie medoidow i srednich",
+      align = "c")
+
+```
+Medoidy w metodzie PAM są dobrane tak, by reprezentowały średnie charakterystyki swoich skupień. Analiza pokazuje, że Medoid 1 ściśle odpowiada średnim wartościom swojego skupienia, szczególnie w zawartości sodu (Na: 13.21) i krzemu (Si: ~72.7), potwierdzając jego typowość. Z kolei Medoid 2, choć ogólnie odzwierciedla wysokosodowy profil skupienia (Na: 14.95), wykazuje pewne ekstremalne cechy – całkowity brak magnezu (Mg: 0.00) i potasu (K: 0.00) oraz niższą zawartość baru (Ba: 0.67) niż średnia skupienia. Różnice te podkreślają główne kontrasty między skupieniami: Skupienie 1 to próbki z magnezem i umiarkowanym sodem, podczas gdy Skupienie 2 to wysokosodowe próbki z barem, ale pozbawione magnezu.
+
+Spójrzmy teraz na wykres PCA
+```{r,fig.height=10, fig.width=12}
+# PCA na danych wystandaryzowanych
+pca_res <- prcomp(dane_stand)
+
+# Projekcja skupień PAM
+pca_pam <- fviz_pca_ind(pca_res, 
+             habillage = factor(pam_clusters),
+             title = "Skupienia PAM w przestrzeni PCA (K=2)",
+             palette = "jco") +
+  theme_minimal()
+
+# Projekcja skupień AGNES
+pca_agnes <- fviz_pca_ind(pca_res, 
+             habillage = factor(agnes_clusters),
+             title = "Skupienia AGNES w przestrzeni PCA (K=2)",
+             palette = "jco") +
+  theme_minimal()
+pca_pam + pca_agnes
+```
+Analiza PCA dla K=2 pokazuje wyraźne różnice w rozmieszczeniu skupień między metodami PAM i AGNES. W przypadku PAM, lewa górna ćwiartka wykresu jest zdominowana przez skupienie 2, podczas gdy pozostałe obszary zawierają głównie skupienie 1, co wskazuje na dobrą separację między tymi grupami. Z kolei w metodzie AGNES prawa górna ćwiartka skupia większość obiektów skupienia 1, a reszta wykresu wypełniona jest głównie obiektami skupienia 2, co sugeruje nieco inną organizację danych. Rozkład ten potwierdza, że PAM lepiej oddziela skupienia w przestrzeni PCA, podczas gdy AGNES tworzy bardziej zrównoważone, ale mniej wyraźnie rozdzielone grupy. Różnice te wynikają z odmiennych zasad działania obu metod – PAM skupia się na reprezentantach (medoidach), podczas gdy AGNES łączy obiekty hierarchicznie, co może prowadzić do łagodniejszych granic między skupieniami.
+
+Podsumowanie: Analiza średnich wartości cech i wykresów pudełkowych ujawniła wyraźne różnice między skupieniami. Skupienie 1 charakteryzuje się niższą średnią zawartością sodu (Na: ~13.2) i obecnością magnezu (Mg: ~3.1), co wskazuje na próbki o bardziej zrównoważonym składzie chemicznym. W Skupieniu 2 dominuje wysoka zawartość sodu (Na: ~14.7) i wyraźna obecność baru (Ba: ~1.0), przy niemal zerowym poziomie magnezu (Mg: ~0.3), co sugeruje próbki o specyficznym, wyspecjalizowanym składzie. Wykresy pudełkowe potwierdzają te różnice, pokazując minimalne nakładanie się rozkładów kluczowych cech (np. Na, Mg) między skupieniami. Rozbieżności w wartościach medoidów względem średnich (zwłaszcza w Skupieniu 2) wskazują na istnienie podgrup wewnątrz skupień, co może wymagać dalszej analizy dla lepszego zrozumienia struktury danych.
+
+
+
